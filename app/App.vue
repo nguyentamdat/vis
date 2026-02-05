@@ -151,6 +151,7 @@ const FOLLOW_THRESHOLD_PX = 24;
 const FLOATING_FOLLOW_THRESHOLD_PX = 2;
 const TOOL_PENDING_TTL_MS = 60_000;
 const TOOL_RUNNING_TTL_MS = 5_000;
+const TOOL_COMPLETE_TTL_MS = 3_000;
 const TOOL_SCROLL_SPEED_PX_S = 2000;
 const TOOL_SCROLL_HOLD_MS = 250;
 const TOOL_SCROLL_MAX_DURATION_S = 3;
@@ -242,6 +243,11 @@ type PermissionRequest = {
 
 type PermissionReply = 'once' | 'always' | 'reject';
 
+type ReasoningFinish = {
+  id: string;
+  time: number;
+};
+
 type PtyInfo = {
   id: string;
   title: string;
@@ -290,6 +296,8 @@ const sessionStatusById = new Map<string, 'busy' | 'idle'>();
 const reasoningCloseTimers = new Map<string, number>();
 const lastReasoningMessageIdByKey = new Map<string, string>();
 const messageAttachmentsById = new Map<string, MessageAttachment[]>();
+const activeReasoningMessageIdByKey = new Map<string, string>();
+const finishedReasoningByKey = new Map<string, ReasoningFinish>();
 const globalEventHooks = new Set<(payload: unknown, eventType: string) => void>();
 const dragState = ref<{
   entry: FileReadEntry;
@@ -953,8 +961,18 @@ function updateReasoningExpiry(sessionId: string | undefined, status: 'busy' | '
   if (!sessionId && !selectedSessionId.value) return;
   const targetSessionId = sessionId ?? selectedSessionId.value;
   if (!targetSessionId) return;
+  const reasoningKey = getReasoningKey(targetSessionId);
+  const finish = getReasoningFinish(reasoningKey);
+  const isFinished = Boolean(finish);
+  if (status === 'idle' && !isFinished) return;
+  if (status === 'busy' && isFinished) return;
   const now = Date.now();
-  const nextExpiresAt = status === 'busy' ? Number.MAX_SAFE_INTEGER : now;
+  const nextExpiresAt =
+    status === 'busy'
+      ? Number.MAX_SAFE_INTEGER
+      : finish
+        ? finish.time + REASONING_CLOSE_DELAY_MS
+        : now;
   queue.value.forEach((entry) => {
     if (!entry.isReasoning) return;
     const matchesSession =
@@ -1083,6 +1101,26 @@ function handlePointerUp() {
 
 function getReasoningKey(sessionId?: string) {
   return sessionId ?? selectedSessionId.value ?? 'main';
+}
+
+function getReasoningFinish(reasoningKey: string, messageId?: string) {
+  const finished = finishedReasoningByKey.get(reasoningKey);
+  if (!finished) return null;
+  if (messageId && finished.id !== messageId) return null;
+  const activeId = activeReasoningMessageIdByKey.get(reasoningKey);
+  if (activeId && finished.id !== activeId) return null;
+  return finished;
+}
+
+function markReasoningFinished(sessionId?: string, messageId?: string) {
+  const resolvedSessionId = sessionId ?? selectedSessionId.value;
+  const reasoningKey = getReasoningKey(resolvedSessionId);
+  const activeId = activeReasoningMessageIdByKey.get(reasoningKey);
+  const resolvedMessageId = messageId ?? activeId;
+  if (!resolvedMessageId) return false;
+  if (activeId && resolvedMessageId !== activeId) return false;
+  finishedReasoningByKey.set(reasoningKey, { id: resolvedMessageId, time: Date.now() });
+  return true;
 }
 
 function clearReasoningCloseTimer(reasoningKey: string) {
@@ -2512,6 +2550,8 @@ watch(selectedSessionId, () => {
   messageSummaryTitleById.clear();
   messageAttachmentsById.clear();
   reasoningTitleBySessionId.clear();
+  activeReasoningMessageIdByKey.clear();
+  finishedReasoningByKey.clear();
   subagentSessionExpiry.clear();
   selectedSessionStatus.value = '';
   if (selectedSessionId.value) {
@@ -4057,8 +4097,20 @@ function upsertToolEntry(
   if (entry.toolName === 'apply_patch' && entry.toolStatus && entry.toolStatus !== 'running') {
     const existingIndex = entry.callId ? toolIndexByCallId.get(entry.callId) : undefined;
     if (existingIndex !== undefined) {
-      queue.value.splice(existingIndex, 1);
-      toolIndexByCallId.delete(entry.callId!);
+      const existing = queue.value[existingIndex];
+      if (existing) {
+        const time = Date.now();
+        const nextExpiresAt = time + TOOL_COMPLETE_TTL_MS;
+        queue.value.splice(existingIndex, 1, {
+          ...existing,
+          time,
+          expiresAt: Math.max(existing.expiresAt, nextExpiresAt),
+          toolStatus: entry.toolStatus,
+        });
+        scheduleToolScrollAnimation(
+          existing.toolKey ?? entry.callId ?? `tool:apply_patch:${time}`,
+        );
+      }
     }
     return;
   }
@@ -4077,8 +4129,15 @@ function upsertToolEntry(
   const defaultExpiry = time + Math.ceil((scrollDuration || 0) * 1000 + TOOL_SCROLL_HOLD_MS);
   const isToolPending = entry.toolStatus === 'pending';
   const isToolRunning = entry.toolStatus === 'running';
-  const toolTtlMs = isToolPending ? TOOL_PENDING_TTL_MS : isToolRunning ? TOOL_RUNNING_TTL_MS : 0;
-  const expiresAt = toolTtlMs > 0 ? time + toolTtlMs : defaultExpiry;
+  const isToolFinished = Boolean(entry.toolStatus && !isToolPending && !isToolRunning);
+  const toolTtlMs = isToolPending
+    ? TOOL_PENDING_TTL_MS
+    : isToolRunning
+      ? TOOL_RUNNING_TTL_MS
+      : isToolFinished
+        ? TOOL_COMPLETE_TTL_MS
+        : 0;
+  const expiresAt = toolTtlMs > 0 ? Math.max(defaultExpiry, time + toolTtlMs) : defaultExpiry;
   const lang =
     langOverride ??
     (detectDiffLike(entry.content, entry.path) ? 'diff' : guessLanguage(entry.path, eventType));
@@ -4090,7 +4149,8 @@ function upsertToolEntry(
       if (existing) {
         const toolKey =
           existing.toolKey ?? entry.callId ?? `${entry.path ?? entry.toolName ?? 'tool'}:${time}`;
-        const nextExpiresAt = toolTtlMs > 0 ? time + toolTtlMs : defaultExpiry;
+        const nextExpiresAt =
+          toolTtlMs > 0 ? Math.max(defaultExpiry, time + toolTtlMs) : defaultExpiry;
         queue.value.splice(existingIndex, 1, {
           ...existing,
           time,
@@ -4257,7 +4317,6 @@ function connect() {
     if (sessionStatus) {
       if (sessionStatus.status === 'busy' || sessionStatus.status === 'idle') {
         const nextStatus = sessionStatus.status as 'busy' | 'idle';
-        clearReasoningCloseTimerForSession(sessionId);
         if (sessionId) sessionStatusById.set(sessionId, nextStatus);
         if (!selectedSessionId.value || sessionId === selectedSessionId.value) {
           selectedSessionStatus.value = nextStatus;
@@ -4300,12 +4359,16 @@ function connect() {
 
     const stepFinish = extractStepFinish(payload, resolvedEventType);
     if (stepFinish) {
-      scheduleReasoningClose(stepFinish.sessionId ?? sessionId);
+      if (markReasoningFinished(stepFinish.sessionId ?? sessionId, stepFinish.messageId)) {
+        scheduleReasoningClose(stepFinish.sessionId ?? sessionId);
+      }
     }
 
     const messageFinish = extractMessageFinish(payload, resolvedEventType);
     if (messageFinish) {
-      scheduleReasoningClose(messageFinish.sessionId ?? sessionId);
+      if (markReasoningFinished(messageFinish.sessionId ?? sessionId, messageFinish.messageId)) {
+        scheduleReasoningClose(messageFinish.sessionId ?? sessionId);
+      }
     }
 
     const patchEvent = extractPatch(payload);
@@ -4369,7 +4432,7 @@ function connect() {
         return;
       }
       const isReasoning = message.partType === 'reasoning';
-      const reasoningKey = sessionId ?? selectedSessionId.value ?? 'main';
+      const reasoningKey = getReasoningKey(sessionId);
       const stableMessageId = isReasoning
         ? `reasoning:${reasoningKey}`
         : (message.messageId ?? message.id);
@@ -4397,6 +4460,11 @@ function connect() {
       const reasoningMessageId = isReasoning
         ? (message.messageId ?? (message.id?.startsWith('msg_') ? message.id : undefined))
         : undefined;
+      if (isReasoning && reasoningMessageId) {
+        activeReasoningMessageIdByKey.set(reasoningKey, reasoningMessageId);
+        const finished = finishedReasoningByKey.get(reasoningKey);
+        if (finished && finished.id !== reasoningMessageId) finishedReasoningByKey.delete(reasoningKey);
+      }
       const lastReasoningMessageId = isReasoning
         ? lastReasoningMessageIdByKey.get(messageKey)
         : undefined;
@@ -4452,20 +4520,11 @@ function connect() {
       const scrollDistance = Math.max(0, overflowLines * lineHeight);
       const scrollDuration =
         overflowLines > 0 ? Math.min(0.25, Math.max(0.08, overflowLines * 0.01)) : 0;
-      const reasoningStatus = isReasoning
-        ? sessionId
-          ? sessionStatusById.get(sessionId) ??
-            (sessionId === selectedSessionId.value ? selectedSessionStatus.value : undefined)
-          : selectedSessionStatus.value
-        : undefined;
-      const isMainReasoning = isReasoning && (!sessionId || sessionId === selectedSessionId.value);
-      const effectiveReasoningStatus =
-        reasoningStatus ?? (isMainReasoning && isThinking.value ? 'busy' : undefined);
-      const reasoningIdleTtl = 0;
+      const reasoningFinish = isReasoning ? getReasoningFinish(reasoningKey, reasoningMessageId) : null;
       const expiresAt = isReasoning
-        ? effectiveReasoningStatus === 'busy'
-          ? Number.MAX_SAFE_INTEGER
-          : time + reasoningIdleTtl
+        ? reasoningFinish
+          ? reasoningFinish.time + REASONING_CLOSE_DELAY_MS
+          : Number.MAX_SAFE_INTEGER
         : isSubagentMessage
           ? getSubagentExpiry(sessionId)
           : time + 1000 * 60 * 30;
