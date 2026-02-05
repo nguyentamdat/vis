@@ -2,35 +2,86 @@
   <div class="top-panel">
     <div class="top-row">
       <div class="top-field">
-        <select
-          id="project-select"
+        <Dropdown
           v-model="projectValue"
-          class="control-input top-select"
-          aria-label="Project"
-          title="Project"
+          :label="selectedProjectLabel"
+          placeholder="Select project"
+          auto-close
         >
-          <option v-if="projects.length === 0" disabled value="">No projects</option>
-          <option v-for="project in projects" :key="project.id" :value="project.id">
-            {{ projectLabel(project) }}
-          </option>
-        </select>
+          <template #default>
+            <div class="dropdown-list">
+              <div v-if="projects.length === 0" class="dropdown-empty">No projects</div>
+              <DropdownItem v-for="project in projects" :key="project.id" :value="project.id">
+                <span class="dropdown-item-label">{{ projectLabel(project) }}</span>
+              </DropdownItem>
+            </div>
+          </template>
+        </Dropdown>
         <button type="button" class="control-button" @click="$emit('new-project')">
           Open project
         </button>
       </div>
       <div class="top-field">
-        <select
-          id="session-select"
-          v-model="sessionValue"
-          class="control-input top-select"
-          aria-label="Session"
-          title="Session"
+        <Dropdown
+          v-model="worktreeValue"
+          :label="selectedWorktreeLabel"
+          placeholder="Select worktree"
+          :disabled="!canManageWorktrees"
+          auto-close
         >
-          <option v-if="sessions.length === 0" disabled value="">No sessions</option>
-          <option v-for="session in sessions" :key="session.id" :value="session.id">
-            {{ sessionLabel(session) }}
-          </option>
-        </select>
+          <template #default="{ close }">
+            <div class="dropdown-list">
+              <div v-if="worktrees.length === 0" class="dropdown-empty">No worktrees</div>
+              <DropdownItem
+                v-for="directory in worktrees"
+                :key="directory"
+                :value="directory"
+              >
+                <span class="dropdown-item-label">{{ worktreeLabel(directory) }}</span>
+                <button
+                  type="button"
+                  class="dropdown-delete"
+                  @click.stop="handleWorktreeDelete(directory, close)"
+                >
+                  Delete
+                </button>
+              </DropdownItem>
+            </div>
+          </template>
+        </Dropdown>
+        <button
+          type="button"
+          class="control-button"
+          :disabled="!canManageWorktrees"
+          @click="$emit('new-worktree')"
+        >
+          Add
+        </button>
+      </div>
+      <div class="top-field">
+        <Dropdown
+          v-model="sessionValue"
+          :label="selectedSessionLabel"
+          placeholder="Select session"
+          :disabled="!canManageSessions"
+          auto-close
+        >
+          <template #default="{ close }">
+            <div class="dropdown-list">
+              <div v-if="sessions.length === 0" class="dropdown-empty">No sessions</div>
+              <DropdownItem v-for="session in sessions" :key="session.id" :value="session.id">
+                <span class="dropdown-item-label">{{ sessionLabel(session) }}</span>
+                <button
+                  type="button"
+                  class="dropdown-delete"
+                  @click.stop="handleSessionDelete(session.id, close)"
+                >
+                  Delete
+                </button>
+              </DropdownItem>
+            </div>
+          </template>
+        </Dropdown>
         <button type="button" class="control-button" @click="$emit('new-session')">
           New
         </button>
@@ -41,6 +92,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import Dropdown from './Dropdown.vue';
+import DropdownItem from './Dropdown/Item.vue';
 type ProjectInfo = {
   id: string;
   worktree?: string;
@@ -57,16 +110,23 @@ type SessionInfo = {
 
 const props = defineProps<{
   projects: ProjectInfo[];
+  worktrees: string[];
   sessions: SessionInfo[];
   selectedProjectId: string;
+  selectedWorktreeDir: string;
   selectedSessionId: string;
+  worktreeBase?: string;
 }>();
 
 const emit = defineEmits<{
   (event: 'update:selected-project-id', value: string): void;
+  (event: 'update:selected-worktree-dir', value: string): void;
   (event: 'update:selected-session-id', value: string): void;
   (event: 'new-project'): void;
+  (event: 'new-worktree'): void;
   (event: 'new-session'): void;
+  (event: 'delete-worktree', value: string): void;
+  (event: 'delete-session', value: string): void;
 }>();
 
 const projectValue = computed({
@@ -79,6 +139,30 @@ const sessionValue = computed({
   set: (value) => emit('update:selected-session-id', value),
 });
 
+const worktreeValue = computed({
+  get: () => props.selectedWorktreeDir,
+  set: (value) => emit('update:selected-worktree-dir', value),
+});
+
+const canManageWorktrees = computed(() => Boolean(props.worktreeBase));
+const canManageSessions = computed(() =>
+  Boolean(props.selectedWorktreeDir || props.worktreeBase),
+);
+
+const selectedProjectLabel = computed(() => {
+  const project = props.projects.find((item) => item.id === props.selectedProjectId);
+  return project ? projectLabel(project) : '';
+});
+
+const selectedWorktreeLabel = computed(() =>
+  props.selectedWorktreeDir ? worktreeLabel(props.selectedWorktreeDir) : '',
+);
+
+const selectedSessionLabel = computed(() => {
+  const session = props.sessions.find((item) => item.id === props.selectedSessionId);
+  return session ? sessionLabel(session) : '';
+});
+
 function projectLabel(project: ProjectInfo) {
   if (project.id === 'global') return 'global /';
   if (project.worktree) return project.worktree;
@@ -88,6 +172,25 @@ function projectLabel(project: ProjectInfo) {
 function sessionLabel(session: SessionInfo) {
   const base = session.title || session.slug || session.id;
   return `${base} (${session.id.slice(0, 6)})`;
+}
+
+function worktreeLabel(directory: string) {
+  const base = props.worktreeBase?.replace(/\/+$/, '') ?? '';
+  if (base && directory.startsWith(base)) {
+    const trimmed = directory.slice(base.length).replace(/^\/+/, '');
+    if (trimmed) return `./${trimmed}`;
+  }
+  return directory;
+}
+
+function handleWorktreeDelete(id: string, close?: () => void) {
+  emit('delete-worktree', id);
+  close?.();
+}
+
+function handleSessionDelete(id: string, close?: () => void) {
+  emit('delete-session', id);
+  close?.();
 }
 </script>
 
@@ -115,28 +218,43 @@ function sessionLabel(session: SessionInfo) {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 320px;
+  flex: 1 1 260px;
   min-width: 0;
 }
 
-.control-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: #0b1320;
-  color: #e2e8f0;
-  border: 1px solid #334155;
-  border-radius: 8px;
+.dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dropdown-empty {
   padding: 6px 8px;
   font-size: 12px;
-  font-family: inherit;
-  outline: none;
-  box-sizing: border-box;
+  color: #94a3b8;
 }
 
-.top-select {
-  text-overflow: ellipsis;
+.dropdown-item-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dropdown-delete {
+  flex: 0 0 auto;
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.dropdown-delete:hover {
+  background: #334155;
 }
 
 .control-button {

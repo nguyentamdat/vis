@@ -3,11 +3,17 @@
     <header class="app-header">
       <TopPanel
         :projects="projects"
+        :worktrees="worktrees"
         :sessions="filteredSessions"
+        :worktree-base="selectedProjectDirectory"
         v-model:selected-project-id="selectedProjectId"
+        v-model:selected-worktree-dir="selectedWorktreeDir"
         v-model:selected-session-id="selectedSessionId"
         @new-project="openProjectPicker"
+        @new-worktree="createWorktree"
         @new-session="createNewSession"
+        @delete-worktree="deleteWorktree"
+        @delete-session="deleteSession"
       />
     </header>
     <main class="app-output">
@@ -103,7 +109,7 @@
     <ProjectPicker
       :open="isProjectPickerOpen"
       :base-url="OPENCODE_BASE_URL"
-      :initial-directory="activeDirectory"
+      :initial-directory="selectedProjectDirectory"
       @close="isProjectPickerOpen = false"
       @select="handleProjectDirectorySelect"
     />
@@ -264,6 +270,12 @@ type SessionInfo = {
   directory?: string;
 };
 
+type WorktreeInfo = {
+  name: string;
+  branch: string;
+  directory: string;
+};
+
 type ProviderModel = {
   id: string;
   name?: string;
@@ -300,6 +312,7 @@ type CommandInfo = {
 };
 
 const projects = ref<ProjectInfo[]>([]);
+const worktrees = ref<string[]>([]);
 const sessions = ref<SessionInfo[]>([]);
 const providers = ref<ProviderInfo[]>([]);
 const agents = ref<AgentInfo[]>([]);
@@ -315,35 +328,39 @@ const providersFetchCount = ref(0);
 const agentsLoading = ref(false);
 const commandsLoading = ref(false);
 const selectedProjectId = ref('');
+const selectedWorktreeDir = ref('');
 const selectedSessionId = ref('');
-const selectedDirectory = ref('');
+const selectedProjectDirectory = ref('');
+const initialQuery = readQuerySelection();
+if (initialQuery.projectId) selectedProjectId.value = initialQuery.projectId;
+if (initialQuery.worktreeDir) selectedWorktreeDir.value = initialQuery.worktreeDir;
+if (initialQuery.sessionId) selectedSessionId.value = initialQuery.sessionId;
 const isProjectPickerOpen = ref(false);
 const selectedMode = ref('build');
 const selectedModel = ref('');
 const selectedThinking = ref('');
 const projectError = ref('');
+const worktreeError = ref('');
 const sessionError = ref('');
 const messageInput = ref('');
 const sendStatus = ref('Ready');
 const isSending = ref(false);
 const isAborting = ref(false);
+const isBootstrapping = ref(false);
 
 const statusText = computed(
-  () => projectError.value || sessionError.value || sendStatus.value,
+  () => projectError.value || worktreeError.value || sessionError.value || sendStatus.value,
 );
-const isStatusError = computed(() => Boolean(projectError.value || sessionError.value));
+const isStatusError = computed(() =>
+  Boolean(projectError.value || worktreeError.value || sessionError.value),
+);
 
 const filteredSessions = computed(() =>
-  sessions.value.filter(
-    (session) => session.projectID === selectedProjectId.value && !session.parentID,
-  ),
+  sessions.value.filter((session) => !session.parentID),
 );
 
-const activeProject = computed(() =>
-  projects.value.find((project) => project.id === selectedProjectId.value),
-);
 const activeDirectory = computed(() =>
-  selectedDirectory.value || activeProject.value?.worktree || '',
+  selectedWorktreeDir.value || selectedProjectDirectory.value || '',
 );
 
 const allowedSessionIds = computed(() => {
@@ -406,6 +423,11 @@ function projectLabel(project: ProjectInfo) {
   return project.id;
 }
 
+function projectBaseDirectory(project: ProjectInfo) {
+  if (project.worktree && project.worktree.trim()) return project.worktree;
+  return project.id;
+}
+
 function sessionLabel(session: SessionInfo) {
   const base = session.title || session.slug || session.id;
   return `${base} (${session.id.slice(0, 6)})`;
@@ -414,6 +436,44 @@ function sessionLabel(session: SessionInfo) {
 function toErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+type QuerySelection = {
+  projectId: string;
+  worktreeDir: string;
+  sessionId: string;
+};
+
+function readQuerySelection(): QuerySelection {
+  if (typeof window === 'undefined') return { projectId: '', worktreeDir: '', sessionId: '' };
+  const params = new URLSearchParams(window.location.search);
+  return {
+    projectId: params.get('project')?.trim() ?? '',
+    worktreeDir: params.get('worktree')?.trim() ?? '',
+    sessionId: params.get('session')?.trim() ?? '',
+  };
+}
+
+function replaceQuerySelection(projectId: string, worktreeDir: string, sessionId: string) {
+  if (typeof window === 'undefined') return;
+  if (!projectId || !sessionId) return;
+  const url = new URL(window.location.href);
+  const nextProject = projectId.trim();
+  const nextWorktree = worktreeDir.trim();
+  const nextSession = sessionId.trim();
+  const params = url.searchParams;
+  const prevWorktree = params.get('worktree') ?? '';
+  const sameSelection =
+    params.get('project') === nextProject &&
+    params.get('session') === nextSession &&
+    (prevWorktree === nextWorktree || (!prevWorktree && !nextWorktree));
+  if (sameSelection) return;
+  params.set('project', nextProject);
+  if (nextWorktree) params.set('worktree', nextWorktree);
+  else params.delete('worktree');
+  params.set('session', nextSession);
+  url.search = params.toString();
+  window.history.replaceState({}, '', url.toString());
 }
 
 function buildMessageKey(messageId: string, sessionId?: string) {
@@ -913,6 +973,89 @@ async function fetchSessions(options: {
   }
 }
 
+async function fetchWorktrees(directory?: string) {
+  worktreeError.value = '';
+  if (!directory) {
+    worktrees.value = [];
+    return;
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set('directory', directory);
+    const query = params.toString();
+    const response = await fetch(
+      `${OPENCODE_BASE_URL}/experimental/worktree${query ? `?${query}` : ''}`,
+    );
+    if (!response.ok) throw new Error(`Worktree request failed (${response.status})`);
+    const data = (await response.json()) as string[];
+    const baseDir = directory?.trim() ?? '';
+    const list = Array.isArray(data) ? data.slice() : [];
+    if (baseDir && !list.includes(baseDir)) list.unshift(baseDir);
+    worktrees.value = list;
+  } catch (error) {
+    worktreeError.value = `Worktree load failed: ${toErrorMessage(error)}`;
+  }
+}
+
+async function createWorktree() {
+  worktreeError.value = '';
+  if (!selectedProjectDirectory.value) {
+    worktreeError.value = 'Worktree base directory not set.';
+    return;
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set('directory', selectedProjectDirectory.value);
+    const query = params.toString();
+    const response = await fetch(
+      `${OPENCODE_BASE_URL}/experimental/worktree${query ? `?${query}` : ''}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    );
+    if (!response.ok) throw new Error(`Worktree create failed (${response.status})`);
+    const data = (await response.json()) as WorktreeInfo;
+    if (data && typeof data.directory === 'string') {
+      if (!worktrees.value.includes(data.directory)) {
+        worktrees.value.unshift(data.directory);
+      }
+      selectedWorktreeDir.value = data.directory;
+    }
+    void fetchWorktrees(selectedProjectDirectory.value || undefined);
+  } catch (error) {
+    worktreeError.value = `Worktree create failed: ${toErrorMessage(error)}`;
+  }
+}
+
+async function deleteWorktree(directory: string) {
+  worktreeError.value = '';
+  if (!directory) return;
+  if (!selectedProjectDirectory.value) {
+    worktreeError.value = 'Worktree base directory not set.';
+    return;
+  }
+  try {
+    const params = new URLSearchParams();
+    params.set('directory', selectedProjectDirectory.value);
+    const query = params.toString();
+    const response = await fetch(
+      `${OPENCODE_BASE_URL}/experimental/worktree${query ? `?${query}` : ''}`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory }),
+      },
+    );
+    if (!response.ok) throw new Error(`Worktree delete failed (${response.status})`);
+    if (selectedWorktreeDir.value === directory) selectedWorktreeDir.value = '';
+    void fetchWorktrees(selectedProjectDirectory.value || undefined);
+  } catch (error) {
+    worktreeError.value = `Worktree delete failed: ${toErrorMessage(error)}`;
+  }
+}
+
 function openProjectPicker() {
   isProjectPickerOpen.value = true;
 }
@@ -935,7 +1078,7 @@ async function createNewSession() {
       if (!existing) sessions.value.unshift(data);
       selectedSessionId.value = data.id;
       if (data.projectID) selectedProjectId.value = data.projectID;
-      if (data.directory) selectedDirectory.value = data.directory;
+      if (data.directory) selectedWorktreeDir.value = data.directory;
     }
     void fetchSessions({ directory: activeDirectory.value || undefined, roots: true, limit: 200 });
   } catch (error) {
@@ -943,33 +1086,78 @@ async function createNewSession() {
   }
 }
 
+async function deleteSession(sessionId: string) {
+  sessionError.value = '';
+  if (!sessionId) return;
+  try {
+    const response = await fetch(`${OPENCODE_BASE_URL}/session/${sessionId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error(`Session delete failed (${response.status})`);
+    if (selectedSessionId.value === sessionId) selectedSessionId.value = '';
+    void fetchSessions({ directory: activeDirectory.value || undefined, roots: true, limit: 200 });
+  } catch (error) {
+    sessionError.value = `Session delete failed: ${toErrorMessage(error)}`;
+  }
+}
+
 async function handleProjectDirectorySelect(directory: string) {
   isProjectPickerOpen.value = false;
   if (!directory) return;
-  selectedDirectory.value = directory;
+  selectedProjectDirectory.value = directory;
+  selectedWorktreeDir.value = '';
+  selectedSessionId.value = '';
+  worktrees.value = [];
   const current = await fetchCurrentProject(directory);
   await fetchProjects();
   if (current) {
     upsertProject(current);
     selectedProjectId.value = current.id;
-    if (current.worktree && selectedDirectory.value !== current.worktree) {
-      selectedDirectory.value = current.worktree;
-    }
   } else if (projects.value.length > 0) {
     const match = projects.value.find((project) => project.worktree === directory);
     if (match) selectedProjectId.value = match.id;
   }
 }
 
-async function initProjects() {
-  const current = await fetchCurrentProject();
-  await fetchProjects();
-  if (current) {
-    upsertProject(current);
-    selectedProjectId.value = current.id;
-    if (current.worktree && selectedDirectory.value !== current.worktree) {
-      selectedDirectory.value = current.worktree;
+async function bootstrapSelections() {
+  if (isBootstrapping.value) return;
+  isBootstrapping.value = true;
+  try {
+    const current = await fetchCurrentProject();
+    await fetchProjects();
+    if (current) upsertProject(current);
+    if (!selectedProjectId.value) {
+      const preferred =
+        current?.id ??
+        projects.value.find((project) => project.id !== 'global')?.id ??
+        projects.value[0]?.id ??
+        '';
+      if (preferred) selectedProjectId.value = preferred;
     }
+    if (!selectedProjectDirectory.value) {
+      const project = projects.value.find((item) => item.id === selectedProjectId.value);
+      if (project) {
+        const baseDir = projectBaseDirectory(project);
+        if (baseDir) selectedProjectDirectory.value = baseDir;
+      }
+    }
+    if (selectedProjectDirectory.value) {
+      await fetchWorktrees(selectedProjectDirectory.value);
+    } else {
+      worktrees.value = [];
+    }
+    if (!selectedWorktreeDir.value) {
+      if (worktrees.value.length > 0) selectedWorktreeDir.value = worktrees.value[0] ?? '';
+    }
+    const directory = activeDirectory.value || undefined;
+    if (directory) {
+      await fetchCommands(directory);
+      await fetchSessions({ directory, roots: true, limit: 200 });
+    } else {
+      sessions.value = [];
+    }
+  } finally {
+    isBootstrapping.value = false;
   }
 }
 
@@ -1080,6 +1268,29 @@ async function fetchCommands(directory?: string) {
     log('Command load failed', error);
   } finally {
     commandsLoading.value = false;
+  }
+}
+
+async function fetchSessionStatus() {
+  try {
+    const response = await fetch(`${OPENCODE_BASE_URL}/session/status`);
+    if (!response.ok) throw new Error(`Session status request failed (${response.status})`);
+    const data = (await response.json()) as Record<string, { type?: string }>;
+    sessionStatusById.clear();
+    Object.entries(data ?? {}).forEach(([sessionId, status]) => {
+      const type = typeof status?.type === 'string' ? status.type : '';
+      if (type === 'busy' || type === 'idle') {
+        sessionStatusById.set(sessionId, type);
+      } else if (type === 'retry') {
+        sessionStatusById.set(sessionId, 'busy');
+      }
+    });
+    if (selectedSessionId.value) {
+      const nextStatus = sessionStatusById.get(selectedSessionId.value);
+      if (nextStatus) selectedSessionStatus.value = nextStatus;
+    }
+  } catch (error) {
+    log('Session status load failed', error);
   }
 }
 
@@ -1488,9 +1699,61 @@ watch(
   () => {
     if (!selectedProjectId.value) return;
     const project = projects.value.find((item) => item.id === selectedProjectId.value);
-    if (project?.worktree && selectedDirectory.value !== project.worktree) {
-      selectedDirectory.value = project.worktree;
+    if (project && !selectedProjectDirectory.value) {
+      const baseDir = projectBaseDirectory(project);
+      if (baseDir) selectedProjectDirectory.value = baseDir;
     }
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedProjectId,
+  (value, previous) => {
+    if (value === previous) return;
+    if (!previous) return;
+    selectedProjectDirectory.value = '';
+    selectedWorktreeDir.value = '';
+    selectedSessionId.value = '';
+    worktrees.value = [];
+    sessions.value = [];
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedProjectDirectory,
+  (directory, previous) => {
+    if (directory === previous) return;
+    if (isBootstrapping.value) return;
+    if (previous) {
+      selectedWorktreeDir.value = '';
+      selectedSessionId.value = '';
+      worktrees.value = [];
+      sessions.value = [];
+    }
+    void fetchWorktrees(directory || undefined);
+  },
+  { immediate: true },
+);
+
+watch(
+  worktrees,
+  (list) => {
+    if (isBootstrapping.value) return;
+    if (list.length === 0) return;
+    if (selectedWorktreeDir.value) return;
+    selectedWorktreeDir.value = list[0] ?? '';
+  },
+  { immediate: true },
+);
+
+watch(
+  selectedWorktreeDir,
+  (value, previous) => {
+    if (value === previous) return;
+    if (!previous) return;
+    selectedSessionId.value = '';
   },
   { immediate: true },
 );
@@ -1499,6 +1762,11 @@ watch(
   [filteredSessions, selectedProjectId],
   () => {
     if (!selectedProjectId.value) return;
+    if (filteredSessions.value.length === 0) return;
+    if (!selectedSessionId.value) {
+      selectedSessionId.value = filteredSessions.value[0]?.id ?? '';
+      return;
+    }
     const isValid = filteredSessions.value.some(
       (session) => session.id === selectedSessionId.value,
     );
@@ -1525,7 +1793,18 @@ watch(selectedSessionId, () => {
     void fetchHistory(selectedSessionId.value);
     void restoreShellSessions(selectedSessionId.value);
   }
-});
+  void fetchSessionStatus();
+},
+{ immediate: true });
+
+watch(
+  [selectedProjectId, selectedWorktreeDir, selectedSessionId],
+  ([projectId, worktreeDir, sessionId]) => {
+    if (!projectId || !sessionId) return;
+    replaceQuerySelection(projectId, worktreeDir, sessionId);
+  },
+  { immediate: true },
+);
 
 watch(
   isThinking,
@@ -1552,7 +1831,12 @@ watch(selectedModel, () => {
 });
 
 watch(activeDirectory, (directory) => {
+  if (isBootstrapping.value) return;
   const activePath = directory || undefined;
+  if (!activePath) {
+    sessions.value = [];
+    return;
+  }
   void fetchCommands(activePath);
   void fetchSessions({ directory: activePath, roots: true, limit: 200 });
 });
@@ -2949,6 +3233,10 @@ function connect() {
       }
     }
 
+    const canRenderSession =
+      Boolean(selectedSessionId.value) && filteredSessions.value.length > 0;
+    if (!canRenderSession) return;
+
     const ptyEvent = extractPtyEvent(payload, resolvedEventType);
     if (ptyEvent) handlePtyEvent(ptyEvent);
 
@@ -3163,10 +3451,10 @@ function connect() {
 
 onMounted(() => {
   hydrateShellPtyStorage();
-  void initProjects();
+  void bootstrapSelections();
   fetchProviders();
   fetchAgents();
-  fetchCommands(activeDirectory.value || undefined);
+  fetchSessionStatus();
   const availableThemes = getBundledThemeNames();
   const chosenTheme = pickShikiTheme(availableThemes);
   if (chosenTheme) shikiTheme.value = chosenTheme;
