@@ -356,7 +356,11 @@ const isStatusError = computed(() =>
 );
 
 const filteredSessions = computed(() =>
-  sessions.value.filter((session) => !session.parentID),
+  sessions.value.filter((session) => {
+    if (session.parentID) return false;
+    if (!selectedProjectId.value) return true;
+    return session.projectID === selectedProjectId.value;
+  }),
 );
 
 const activeDirectory = computed(() =>
@@ -1621,8 +1625,22 @@ async function sendCommand(sessionId: string, command: CommandInfo, commandArgs:
 async function sendMessage() {
   if (!canSend.value) return;
   const text = messageInput.value.trim();
-  const sessionId = selectedSessionId.value;
+  let sessionId = selectedSessionId.value;
   if (!text || !sessionId) return;
+  const expectedProjectId = selectedProjectId.value;
+  if (
+    !filteredSessions.value.some(
+      (session) => session.id === sessionId && session.projectID === expectedProjectId,
+    )
+  ) {
+    const fallback = filteredSessions.value[0];
+    if (!fallback) {
+      sendStatus.value = 'No session selected.';
+      return;
+    }
+    selectedSessionId.value = fallback.id;
+    sessionId = fallback.id;
+  }
   const slash = parseSlashCommand(text);
   const commandMatch = slash ? findCommandByName(slash.name) : null;
   const selectedInfo = modelOptions.value.find((model) => model.id === selectedModel.value);
