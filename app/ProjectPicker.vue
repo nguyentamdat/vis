@@ -13,7 +13,6 @@
             class="control-input"
             type="text"
             placeholder="Search directories"
-            @keydown="handleKeydown"
           />
         </div>
         <div v-if="error" class="error-text">{{ error }}</div>
@@ -28,7 +27,7 @@
               :class="{ 'is-active': index === activeSearchIndex }"
               @click="activateSearchResult(index)"
             >
-              {{ result.label }}
+              <span v-html="result.labelHtml"></span>
             </button>
             <div v-if="!searching && searchResults.length === 0" class="empty-text">
               No results.
@@ -51,6 +50,11 @@ type FileNode = {
   type: 'file' | 'directory';
   ignored: boolean;
 };
+type SearchResult = {
+  path: string;
+  label: string;
+  labelHtml: string;
+};
 
 const props = defineProps<{
   open: boolean;
@@ -69,6 +73,7 @@ const searching = ref(false);
 const error = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const activeSearchIndex = ref(-1);
+const homePath = ref('');
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 let searchRequestId = 0;
 let searchController: AbortController | null = null;
@@ -87,7 +92,7 @@ const searchQuery = customRef<string>((track, trigger) => {
     },
   };
 });
-const searchResults = ref<Array<{ path: string; label: string }>>([]);
+const searchResults = ref<SearchResult[]>([]);
 
 const activeBasePath = computed(() => basePaths.value.find((base) => base.id === baseId.value));
 
@@ -142,6 +147,7 @@ async function loadBasePaths() {
       const home = candidates.find((base) => base.id === 'home');
       baseId.value = home?.id ?? candidates[0]!.id;
     }
+    homePath.value = candidates.find((base) => base.id === 'home')?.path ?? '';
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }
@@ -161,7 +167,7 @@ function applyInitialDirectory(initialDirectory: string) {
 }
 
 async function loadDefaultResults() {
-  const base = activeBasePath.value?.path;
+  const base = homePath.value || activeBasePath.value?.path;
   if (!base) {
     searchResults.value = [];
     activeSearchIndex.value = -1;
@@ -172,23 +178,30 @@ async function loadDefaultResults() {
     searchController.abort();
     searchController = null;
   }
+  const controller = new AbortController();
+  searchController = controller;
   const requestId = ++searchRequestId;
   searching.value = true;
   error.value = '';
   try {
-    const params = new URLSearchParams();
-    params.set('directory', base);
-    const response = await fetch(`${props.baseUrl}/file?${params.toString()}`);
-    if (!response.ok) throw new Error(`File request failed (${response.status})`);
-    const data = (await response.json()) as FileNode[];
+    const params = new URLSearchParams({
+      directory: base,
+      query: '',
+      type: 'directory',
+      limit: '50',
+    });
+    const response = await fetch(`${props.baseUrl}/find/file?${params.toString()}`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Search request failed (${response.status})`);
+    const data = (await response.json()) as string[];
     const list = Array.isArray(data) ? data : [];
     if (requestId !== searchRequestId) return;
-    const results = list
-      .filter((node) => node.type === 'directory' && !node.ignored)
-      .map((node) => {
-        const absolute = node.absolute || node.path || `${base.replace(/\/+$/, '')}/${node.name}`;
-        return { path: absolute, label: node.name };
-      });
+    const results = list.map((item) => {
+      const relative = item.replace(/^\/+/, '').replace(/\/+$/, '');
+      const absolute = `${base.replace(/\/+$/, '')}/${relative}`;
+      return buildSearchResult(absolute, `~/${relative}`);
+    });
     searchResults.value = sortResults(results);
     activeSearchIndex.value = searchResults.value.length > 0 ? 0 : -1;
   } catch (err) {
@@ -214,31 +227,58 @@ async function runSearch(query: string) {
   searchController = controller;
   searching.value = true;
   error.value = '';
-  let usedBase = false;
   try {
+    if (trimmed.startsWith('/')) {
+      const normalized = normalizeAbsoluteQuery(trimmed);
+      const { basePath, filterText } = splitAbsoluteQuery(normalized);
+      const params = new URLSearchParams({
+        directory: basePath,
+        path: '',
+      });
+      const response = await fetch(`${props.baseUrl}/file?${params.toString()}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`File request failed (${response.status})`);
+      const data = (await response.json()) as FileNode[];
+      const list = Array.isArray(data) ? data : [];
+      if (requestId !== searchRequestId) return;
+      const results = list
+        .filter((node) => node.type === 'directory' && !node.ignored)
+        .filter((node) => {
+          if (!filterText) return true;
+          const candidate = node.path || node.name || '';
+          return candidate.startsWith(filterText);
+        })
+        .map((node) => {
+          const absolute = node.absolute || node.path || `${basePath.replace(/\/+$/, '')}/${node.name}`;
+          return buildSearchResult(absolute, absolute, filterText);
+        });
+      searchResults.value = sortResults(results);
+      activeSearchIndex.value = searchResults.value.length > 0 ? 0 : -1;
+      return;
+    }
+
+    const searchBase = homePath.value || base;
+    if (!searchBase) throw new Error('Search base not available');
     const params = new URLSearchParams({
+      directory: searchBase,
       query: trimmed,
       type: 'directory',
       limit: '50',
     });
-    let response = await fetch(`${props.baseUrl}/find/file?${params.toString()}`, {
+    const response = await fetch(`${props.baseUrl}/find/file?${params.toString()}`, {
       signal: controller.signal,
     });
-    if (!response.ok && base) {
-      params.set('directory', base);
-      usedBase = true;
-      response = await fetch(`${props.baseUrl}/find/file?${params.toString()}`, {
-        signal: controller.signal,
-      });
-    }
     if (!response.ok) throw new Error(`Search request failed (${response.status})`);
     const data = (await response.json()) as string[];
     const results = Array.isArray(data) ? data : [];
     if (requestId !== searchRequestId) return;
     searchResults.value = sortResults(
       results.map((item) => {
-        const label = usedBase && base ? toRelativeFromBase(item, base) || item : item;
-        return { path: item, label };
+        const relative = item.replace(/^\/+/, '').replace(/\/+$/, '');
+        const absolute = `${searchBase.replace(/\/+$/, '')}/${relative}`;
+        const label = `~/${relative}`;
+        return buildSearchResult(absolute, label, trimmed);
       }),
     );
     activeSearchIndex.value = searchResults.value.length > 0 ? 0 : -1;
@@ -308,10 +348,72 @@ function toRelativeFromBase(resultPath: string, base: string) {
   return resultPath.replace(/^\/+/, '').replace(/\/+$/, '');
 }
 
-function sortResults(items: Array<{ path: string; label: string }>) {
+function normalizeAbsoluteQuery(value: string) {
+  return value.replace(/\/+/g, '/');
+}
+
+function splitAbsoluteQuery(value: string) {
+  if (value === '/') return { basePath: '/', filterText: '' };
+  const trailingSlash = value.endsWith('/');
+  const cleaned = value.replace(/\/+$/, '');
+  if (trailingSlash) {
+    return { basePath: cleaned || '/', filterText: '' };
+  }
+  const lastSlash = cleaned.lastIndexOf('/');
+  if (lastSlash <= 0) {
+    return {
+      basePath: '/',
+      filterText: cleaned.replace(/^\/+/, ''),
+    };
+  }
+  const basePath = cleaned.slice(0, lastSlash) || '/';
+  const filterText = cleaned.slice(lastSlash + 1);
+  return { basePath, filterText };
+}
+
+function sortResults(items: SearchResult[]) {
   return [...items].sort((a, b) =>
     a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }),
   );
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function highlightMatch(label: string, match?: string) {
+  if (!match) return escapeHtml(label);
+  const escapedMatch = match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escapedMatch) return escapeHtml(label);
+  const regex = new RegExp(escapedMatch, 'gi');
+  let result = '';
+  let lastIndex = 0;
+  let hasMatch = false;
+  for (const hit of label.matchAll(regex)) {
+    if (hit.index === undefined) continue;
+    hasMatch = true;
+    const start = hit.index;
+    const end = start + hit[0].length;
+    result += escapeHtml(label.slice(lastIndex, start));
+    result += `<strong class="match">${escapeHtml(hit[0])}</strong>`;
+    lastIndex = end;
+  }
+  if (!hasMatch) return escapeHtml(label);
+  result += escapeHtml(label.slice(lastIndex));
+  return result;
+}
+
+function buildSearchResult(path: string, label: string, match?: string): SearchResult {
+  return {
+    path,
+    label,
+    labelHtml: highlightMatch(label, match),
+  };
 }
 </script>
 
@@ -415,6 +517,10 @@ function sortResults(items: Array<{ path: string; label: string }>) {
 .list-item.is-active {
   border-color: #60a5fa;
   background: rgba(37, 99, 235, 0.2);
+}
+
+.list-item .match {
+  font-weight: 700;
 }
 
 .empty-text {
