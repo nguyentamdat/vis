@@ -95,12 +95,17 @@
                     @reply="handleQuestionReply"
                     @reject="handleQuestionReject"
                   />
-                  <div
-                    v-else
-                    class="shiki-host"
-                    :class="{ 'is-message': q.isSubagentMessage }"
-                    v-html="q.html"
-                  ></div>
+                <div
+                  v-else
+                  class="shiki-host"
+                  :class="{
+                    'is-message': q.isSubagentMessage,
+                    'no-gutter': q.toolGutterMode === 'none',
+                    'grep-gutter': q.toolGutterMode === 'grep-source',
+                    'wrap-soft': q.toolWrapMode === 'soft',
+                  }"
+                  v-html="q.html"
+                ></div>
                 </div>
                 <div
                   v-if="
@@ -178,7 +183,6 @@ const TOOL_PENDING_TTL_MS = 60_000;
 const TOOL_COMPLETE_TTL_MS = 2_000;
 const TOOL_SCROLL_SPEED_PX_S = 2000;
 const TOOL_SCROLL_HOLD_MS = 250;
-const TOOL_SCROLL_MAX_DURATION_S = 3;
 const SUBAGENT_ACTIVE_TTL_MS = 60 * 60 * 1000;
 const TASK_WINDOW_WIDTH = 360;
 const TASK_WINDOW_HEIGHT = 240;
@@ -190,6 +194,17 @@ const QUESTION_WINDOW_WIDTH = 760;
 const QUESTION_WINDOW_HEIGHT = 380;
 const QUESTION_WINDOW_MIN_WIDTH = 560;
 const QUESTION_WINDOW_MIN_HEIGHT = 240;
+const TERM_COLUMNS = 80;
+const TERM_ROWS = 25;
+const TERM_FONT_SIZE_PX = 13;
+const TERM_LINE_HEIGHT = 1.1;
+const TERM_TITLEBAR_HEIGHT_PX = 22;
+const TERM_WINDOW_BORDER_PX = 2;
+const TERM_INNER_PADDING_X_PX = 4;
+const TERM_INNER_PADDING_Y_PX = 4;
+const TERM_GUTTER_WIDTH_EM = 3.2;
+const TERM_FONT_FAMILY =
+  "'Iosevka Term', 'Iosevka Fixed', 'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace";
 const TASK_LIST_TOOL_KEY = 'task:list';
 const MAIN_REASONING_TITLE = 'Reasoning';
 const REASONING_CLOSE_DELAY_MS = 3000;
@@ -250,6 +265,9 @@ type FileReadEntry = {
   toolName?: string;
   toolTitle?: string;
   toolLang?: string;
+  toolWrapMode?: 'default' | 'soft';
+  toolGutterMode?: 'default' | 'none' | 'grep-source';
+  toolGutterLines?: string[];
   messageId?: string;
   messageKey?: string;
   messageAgent?: string;
@@ -425,6 +443,7 @@ const recentUserInputs: { text: string; time: number }[] = [];
 const shellSessionsByPtyId = new Map<string, ShellSession>();
 const shellPtyIdsBySessionId = new Map<string, Set<string>>();
 const pendingShellFits = new Map<string, number>();
+const pendingToolScrollFrames = new Map<string, number>();
 const permissionSendingById = ref<Record<string, boolean>>({});
 const permissionErrorById = ref<Record<string, string>>({});
 const questionSendingById = ref<Record<string, boolean>>({});
@@ -780,6 +799,50 @@ function nextWindowZ() {
   syncNextWindowZIndex();
   nextWindowZIndex += 1;
   return nextWindowZIndex;
+}
+
+function measureTerminalCellWidth(fontFamily: string, fontSizePx: number) {
+  if (typeof document === 'undefined') return fontSizePx * 0.62;
+  const probe = document.createElement('span');
+  probe.textContent = 'MMMMMMMMMM';
+  probe.style.position = 'absolute';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.whiteSpace = 'pre';
+  probe.style.fontFamily = fontFamily;
+  probe.style.fontSize = `${fontSizePx}px`;
+  probe.style.lineHeight = String(TERM_LINE_HEIGHT);
+  document.body.appendChild(probe);
+  const rect = probe.getBoundingClientRect();
+  probe.remove();
+  const width = rect.width / 10;
+  return Number.isFinite(width) && width > 0 ? width : fontSizePx * 0.62;
+}
+
+function getTerminalWindowSize() {
+  const cellWidth = measureTerminalCellWidth(TERM_FONT_FAMILY, TERM_FONT_SIZE_PX);
+  const lineHeightPx = TERM_FONT_SIZE_PX * TERM_LINE_HEIGHT;
+  const gutterWidthPx = TERM_FONT_SIZE_PX * TERM_GUTTER_WIDTH_EM;
+  const contentWidth = TERM_COLUMNS * cellWidth;
+  const contentHeight = TERM_ROWS * lineHeightPx;
+  const width = Math.ceil(
+    contentWidth + gutterWidthPx + TERM_INNER_PADDING_X_PX + TERM_WINDOW_BORDER_PX,
+  );
+  const height = Math.ceil(
+    contentHeight + TERM_TITLEBAR_HEIGHT_PX + TERM_INNER_PADDING_Y_PX + TERM_WINDOW_BORDER_PX,
+  );
+  return { width, height };
+}
+
+function syncCanvasTermMetrics() {
+  const canvas = canvasEl.value;
+  if (!canvas) return;
+  const { width, height } = getTerminalWindowSize();
+  canvas.style.setProperty('--term-font-family', TERM_FONT_FAMILY);
+  canvas.style.setProperty('--term-font-size', `${TERM_FONT_SIZE_PX}px`);
+  canvas.style.setProperty('--term-line-height', String(TERM_LINE_HEIGHT));
+  canvas.style.setProperty('--term-width', `${width}px`);
+  canvas.style.setProperty('--term-height', `${height}px`);
 }
 
 function bringToFront(entry: FileReadEntry) {
@@ -1375,43 +1438,57 @@ function handleFloatingWheel(entry: FileReadEntry, event: WheelEvent) {
 }
 
 function scheduleToolScrollAnimation(toolKey: string) {
+  const existing = pendingToolScrollFrames.get(toolKey);
+  if (existing !== undefined) {
+    cancelAnimationFrame(existing);
+    pendingToolScrollFrames.delete(toolKey);
+  }
   nextTick(() => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const canvas = canvasEl.value;
-        if (!canvas) return;
-        const term = canvas.querySelector(
-          `[data-tool-key="${toolKey}"] .term-inner`,
-        ) as HTMLElement | null;
-        if (!term) return;
-        const host = term.querySelector('.shiki-host') as HTMLElement | null;
-        const lineNodes = host?.querySelectorAll('.line') ?? [];
-        const lineCount = lineNodes.length || 0;
-        const lineSample = lineNodes.length > 0 ? (lineNodes[0] as HTMLElement) : null;
-        const sampleHeight = lineSample?.getBoundingClientRect().height ?? 0;
-        const fontSize = Number.parseFloat(getComputedStyle(term).fontSize) || 14;
-        const lineHeight = sampleHeight > 0 ? sampleHeight : fontSize;
-        const visibleLines = Math.max(1, Math.floor(term.clientHeight / lineHeight));
-        const totalLines = lineCount > 0 ? lineCount : (term.textContent ?? '').split('\n').length;
-        const distance = Math.max(0, (totalLines - visibleLines) * lineHeight);
-        if (distance <= 0) return;
-        const index = queue.value.findIndex((entry) => entry.toolKey === toolKey);
-        if (index < 0) return;
-        const entry = queue.value[index];
-        const baseDuration = distance / TOOL_SCROLL_SPEED_PX_S;
-        const duration =
-          entry.toolName === 'read'
-            ? Math.min(baseDuration, TOOL_SCROLL_MAX_DURATION_S)
-            : baseDuration;
+    const frame = requestAnimationFrame(() => {
+      pendingToolScrollFrames.delete(toolKey);
+      const canvas = canvasEl.value;
+      if (!canvas) return;
+      const term = canvas.querySelector(
+        `[data-tool-key="${toolKey}"] .term-inner`,
+      ) as HTMLElement | null;
+      if (!term) return;
+      const host = term.querySelector('.shiki-host') as HTMLElement | null;
+      if (!host) return;
+
+      const distance = Math.max(0, host.scrollHeight - term.clientHeight);
+      const index = queue.value.findIndex((entry) => entry.toolKey === toolKey);
+      if (index < 0) return;
+      const entry = queue.value[index];
+
+      if (distance <= 1) {
+        if (!entry.scroll) return;
         queue.value.splice(index, 1, {
           ...entry,
-          expiresAt: entry.expiresAt,
-          scroll: true,
-          scrollDistance: distance,
-          scrollDuration: duration,
+          scroll: false,
+          scrollDistance: 0,
+          scrollDuration: 0,
         });
+        return;
+      }
+
+      const duration = distance / TOOL_SCROLL_SPEED_PX_S;
+      if (
+        entry.scroll &&
+        Math.abs((entry.scrollDistance ?? 0) - distance) < 1 &&
+        Math.abs((entry.scrollDuration ?? 0) - duration) < 0.01
+      ) {
+        return;
+      }
+
+      queue.value.splice(index, 1, {
+        ...entry,
+        expiresAt: entry.expiresAt,
+        scroll: true,
+        scrollDistance: distance,
+        scrollDuration: duration,
       });
     });
+    pendingToolScrollFrames.set(toolKey, frame);
   });
 }
 
@@ -2438,10 +2515,9 @@ function ensureShellWindow(pty: PtyInfo, sessionId: string, options: { preserve?
   queue.value.push(entry);
   if (!options.preserve) addShellPtyId(sessionId, pty.id);
   const terminal = new Terminal({
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
-    fontSize: 13,
-    lineHeight: 1.1,
+    fontFamily: TERM_FONT_FAMILY,
+    fontSize: TERM_FONT_SIZE_PX,
+    lineHeight: TERM_LINE_HEIGHT,
     cursorBlink: true,
     theme: {
       background: '#050505',
@@ -2584,6 +2660,315 @@ function findCommandByName(name: string) {
   return commands.value.find((command) => command.name.toLowerCase() === target) ?? null;
 }
 
+type DebugToolEvent = {
+  status: 'running' | 'completed' | 'error';
+  input?: Record<string, unknown>;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  error?: unknown;
+  delayMs?: number;
+};
+
+function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
+  const basePath = getSelectedWorktreeDirectory() || '/tmp/debug';
+  const sampleFile = `${basePath.replace(/\/+$/, '')}/src/sample.ts`;
+  const sampleAltFile = `${basePath.replace(/\/+$/, '')}/README.md`;
+  const debugReadBody = Array.from({ length: 240 }, (_, index) => {
+    const line = index + 1;
+    return `${line}|const item_${line} = { id: ${line}, label: 'debug-line-${line}', status: ${line % 2 === 0 ? "'ok'" : "'pending'"} };`;
+  }).join('\n');
+  const debugReadOutput = `<file>\n${debugReadBody}\n</file>`;
+  switch (tool) {
+    case 'apply_patch':
+      return [
+        {
+          status: 'running',
+          input: {
+            patchText:
+              '*** Begin Patch\n*** Update File: src/sample.ts\n@@\n-console.log("old")\n+console.log("new")\n*** Update File: README.md\n@@\n-Old line\n+New line\n*** End Patch',
+          },
+        },
+        {
+          status: 'completed',
+          delayMs: 550,
+          input: {
+            patchText:
+              '*** Begin Patch\n*** Update File: src/sample.ts\n@@\n-console.log("old")\n+console.log("new")\n*** Update File: README.md\n@@\n-Old line\n+New line\n*** End Patch',
+          },
+          metadata: {
+            files: [
+              {
+                relativePath: 'src/sample.ts',
+                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-console.log("old")\n+console.log("new")',
+              },
+              {
+                relativePath: 'README.md',
+                diff: 'diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-Old line\n+New line',
+              },
+            ],
+          },
+          output: 'Patch applied',
+        },
+      ];
+    case 'bash':
+      return [
+        {
+          status: 'running',
+          input: {
+            command:
+              "python - <<'PY'\nprint('build start')\nfor i in range(3):\n    print('step', i + 1)\nPY",
+            description: 'Run debug script',
+          },
+          output: 'build start\nstep 1\nstep 2',
+        },
+        {
+          status: 'completed',
+          delayMs: 500,
+          input: {
+            command:
+              "python - <<'PY'\nprint('build start')\nfor i in range(3):\n    print('step', i + 1)\nPY",
+            description: 'Run debug script',
+          },
+          output: 'build start\nstep 1\nstep 2\nstep 3\ncompleted',
+        },
+      ];
+    case 'batch':
+      return [
+        {
+          status: 'running',
+          input: { tool_calls: [{ tool: 'glob' }, { tool: 'grep' }] },
+          output: 'Running 2 calls...',
+        },
+        {
+          status: 'completed',
+          delayMs: 450,
+          input: { tool_calls: [{ tool: 'glob' }, { tool: 'grep' }] },
+          output: 'Successfully executed 2/2 calls',
+        },
+      ];
+    case 'codesearch':
+      return [
+        { status: 'running', input: { query: 'react usememo patterns' }, output: 'Searching web index...' },
+        {
+          status: 'completed',
+          delayMs: 420,
+          input: { query: 'react usememo patterns' },
+          output: '## Results\n- useMemo helps cache expensive calculations\n- Keep dependencies minimal',
+        },
+      ];
+    case 'edit':
+      return [
+        {
+          status: 'running',
+          input: { filePath: sampleFile, oldString: 'old', newString: 'new' },
+          output: 'Editing file...',
+        },
+        {
+          status: 'completed',
+          delayMs: 420,
+          input: { filePath: sampleFile, oldString: 'old', newString: 'new' },
+          metadata: {
+            diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-const value = "old"\n+const value = "new"',
+          },
+          output: 'Applied edit',
+        },
+      ];
+    case 'glob':
+      return [
+        { status: 'running', input: { pattern: 'src/**/*.ts', path: basePath }, output: 'Searching...' },
+        {
+          status: 'completed',
+          delayMs: 360,
+          input: { pattern: 'src/**/*.ts', path: basePath },
+          output: `${sampleFile}\n${basePath}/src/debug/util.ts`,
+        },
+      ];
+    case 'grep':
+      return [
+        { status: 'running', input: { pattern: 'console\\.log', path: basePath }, output: 'Scanning files...' },
+        {
+          status: 'completed',
+          delayMs: 380,
+          input: { pattern: 'console\\.log', path: basePath },
+          output:
+            `Found 2 matches\n${sampleFile}:\n  Line 111: console.log("debug")\n  Line 128: console.log(result)\nsummary line without marker`,
+        },
+      ];
+    case 'list':
+      return [
+        { status: 'running', input: { path: basePath }, output: 'Listing directory...' },
+        {
+          status: 'completed',
+          delayMs: 360,
+          input: { path: basePath },
+          output: '.\n├── src\n│   └── sample.ts\n└── README.md',
+        },
+      ];
+    case 'multiedit':
+      return [
+        {
+          status: 'running',
+          input: { filePath: sampleFile, edits: [{ oldString: 'old', newString: 'new' }] },
+          output: 'Applying 2 edits...',
+        },
+        {
+          status: 'completed',
+          delayMs: 430,
+          input: { filePath: sampleFile, edits: [{ oldString: 'old', newString: 'new' }] },
+          metadata: {
+            results: [
+              {
+                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-const first = old\n+const first = new',
+              },
+              {
+                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -3,1 +3,1 @@\n-const second = old\n+const second = new',
+              },
+            ],
+          },
+          output: 'Applied 2 edits',
+        },
+      ];
+    case 'plan_enter':
+      return [
+        {
+          status: 'completed',
+          input: {},
+          output: 'Switched to plan agent',
+        },
+      ];
+    case 'plan_exit':
+      return [
+        {
+          status: 'completed',
+          input: {},
+          output: 'Switched to build agent',
+        },
+      ];
+    case 'read':
+      return [
+        { status: 'running', input: { filePath: sampleFile }, output: '<file>\n</file>' },
+        {
+          status: 'completed',
+          delayMs: 380,
+          input: { filePath: sampleFile },
+          output: debugReadOutput,
+        },
+      ];
+    case 'task':
+      return [
+        { status: 'running', input: { description: 'Analyze routes' }, output: 'task_id: task_debug_1' },
+        {
+          status: 'completed',
+          delayMs: 420,
+          input: { description: 'Analyze routes' },
+          output: 'task_id: task_debug_1\n<task_result>\nFound 3 route handlers and 1 auth guard.\n</task_result>',
+        },
+      ];
+    case 'webfetch':
+      return [
+        { status: 'running', input: { url: 'https://example.com', format: 'markdown' }, output: 'Fetching...' },
+        {
+          status: 'completed',
+          delayMs: 420,
+          input: { url: 'https://example.com', format: 'markdown' },
+          output: '# Example Domain\n\nThis domain is for illustrative examples in documents.',
+        },
+      ];
+    case 'websearch':
+      return [
+        { status: 'running', input: { query: 'vite vue performance tips' }, output: 'Searching...' },
+        {
+          status: 'completed',
+          delayMs: 430,
+          input: { query: 'vite vue performance tips' },
+          output: '## Search Results\n- Use dynamic import for large routes\n- Enable build cache in CI',
+        },
+      ];
+    case 'write':
+      return [
+        {
+          status: 'running',
+          input: { filePath: sampleAltFile, content: 'hello\n' },
+          output: 'Writing file...',
+        },
+        {
+          status: 'completed',
+          delayMs: 360,
+          input: { filePath: sampleAltFile, content: 'hello\n' },
+          output: 'Wrote README.md',
+        },
+      ];
+    default:
+      return null;
+  }
+}
+
+function dispatchSyntheticToolPart(part: Record<string, unknown>) {
+  const payload = {
+    type: 'messagePartUpdated',
+    payload: {
+      properties: {
+        part,
+      },
+    },
+  };
+  const patchEvents = extractPatch(payload);
+  if (patchEvents) {
+    patchEvents.forEach((entry) => upsertToolEntry(entry, 'message', 'diff'));
+    return;
+  }
+  const fileRead = extractFileRead(payload, 'message');
+  if (fileRead) upsertToolEntry(fileRead, 'message');
+}
+
+function runDebugTool(tool: string) {
+  const normalized = tool.trim().toLowerCase();
+  if (!normalized || normalized === 'help' || normalized === 'list') {
+    const tools = Array.from(TOOL_WINDOW_SUPPORTED.values()).join(', ');
+    return { ok: true, message: `Debug tools: ${tools}` };
+  }
+
+  const toolsToRun =
+    normalized === 'all' ? Array.from(TOOL_WINDOW_SUPPORTED.values()) : [normalized];
+
+  for (const toolName of toolsToRun) {
+    const events = buildDebugToolEvents(toolName);
+    if (!events) {
+      return { ok: false, message: `Unknown debug tool: ${toolName}` };
+    }
+    const baseCallId = `debug:${toolName}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    let offset = 0;
+    events.forEach((event, index) => {
+      const delay = Math.max(0, event.delayMs ?? (index === 0 ? 0 : 350));
+      offset += delay;
+      const sessionId = selectedSessionId.value || 'ses_debug';
+      window.setTimeout(() => {
+        dispatchSyntheticToolPart({
+          type: 'tool',
+          tool: toolName,
+          callID: baseCallId,
+          sessionID: sessionId,
+          state: {
+            status: event.status,
+            input: event.input ?? {},
+            output: event.output,
+            metadata: event.metadata,
+            error: event.error,
+          },
+        });
+      }, offset);
+    });
+  }
+
+  return {
+    ok: true,
+    message:
+      normalized === 'all'
+        ? `Queued debug events for ${TOOL_WINDOW_SUPPORTED.size} tools.`
+        : `Queued debug events for ${normalized}.`,
+  };
+}
+
 async function sendCommand(sessionId: string, command: CommandInfo, commandArgs: string) {
   const params = new URLSearchParams();
   const directory = activeDirectory.value.trim();
@@ -2640,6 +3025,11 @@ async function sendMessage() {
     if (slash && slash.name.toLowerCase() === 'shell') {
       await openShellFromInput(slash.arguments ?? '');
       sendStatus.value = 'Shell ready.';
+      return;
+    }
+    if (slash && slash.name.toLowerCase() === 'debug') {
+      const debugResult = runDebugTool(slash.arguments ?? 'list');
+      sendStatus.value = debugResult.message;
       return;
     }
     if (slash && commandMatch) {
@@ -3209,6 +3599,31 @@ function extractFileBodyFromReadOutput(output: string) {
   }
   if (contentLines.length === 0) return null;
   return contentLines.join('\n');
+}
+
+function parseGrepOutputWithSourceLines(output: string) {
+  const lines = output.split('\n');
+  const contentLines: string[] = [];
+  const gutterLines: string[] = [];
+  let hasSourceLine = false;
+
+  for (const line of lines) {
+    const match = line.match(/^\s*Line\s+(\d+):\s?(.*)$/);
+    if (match) {
+      hasSourceLine = true;
+      gutterLines.push(match[1] ?? '');
+      contentLines.push(match[2] ?? '');
+      continue;
+    }
+    gutterLines.push('');
+    contentLines.push(line);
+  }
+
+  if (!hasSourceLine) return null;
+  return {
+    content: contentLines.join('\n'),
+    gutterLines,
+  };
 }
 
 function formatGlobToolTitle(input: Record<string, unknown> | undefined) {
@@ -3878,6 +4293,28 @@ function buildHtml(text: string, lang: string) {
   return `<pre class="shiki"><code>${escapeHtml(text)}</code></pre>`;
 }
 
+function applyToolLineGutters(html: string, gutterLines?: string[]) {
+  if (!Array.isArray(gutterLines) || gutterLines.length === 0) return html;
+  let index = 0;
+  return html.replace(/<span class="line([^"]*)">/g, (full, suffix) => {
+    const gutter = gutterLines[index] ?? '';
+    index += 1;
+    return `<span class="line${suffix}" data-gutter="${escapeHtml(gutter)}">`;
+  });
+}
+
+function buildEntryHtml(
+  text: string,
+  lang: string,
+  options?: { toolGutterMode?: FileReadEntry['toolGutterMode']; toolGutterLines?: string[] },
+) {
+  const html = buildHtml(text, lang);
+  if (options?.toolGutterMode === 'grep-source') {
+    return applyToolLineGutters(html, options.toolGutterLines);
+  }
+  return html;
+}
+
 function countWrappedLines(text: string, columns: number) {
   if (columns <= 0) return text.split('\n').length;
   const lines = text.split('\n');
@@ -4218,6 +4655,9 @@ function extractFileRead(payload: unknown, eventType: string) {
     let path: string | undefined;
     let toolTitle: string | undefined;
     let lang: string | undefined;
+    let wrapMode: FileReadEntry['toolWrapMode'];
+    let gutterMode: FileReadEntry['toolGutterMode'];
+    let gutterLines: string[] | undefined;
 
     switch (tool) {
       case 'bash': {
@@ -4225,6 +4665,8 @@ function extractFileRead(payload: unknown, eventType: string) {
         path = undefined;
         toolTitle = formatBashToolTitle(input, state);
         lang = 'shellscript';
+        wrapMode = 'soft';
+        gutterMode = 'none';
         break;
       }
       case 'read': {
@@ -4237,7 +4679,18 @@ function extractFileRead(payload: unknown, eventType: string) {
       case 'grep': {
         path = typeof input?.path === 'string' ? input.path : undefined;
         toolTitle = formatGlobToolTitle(input);
-        if (outputText) content = outputText;
+        if (outputText) {
+          const parsed = parseGrepOutputWithSourceLines(outputText);
+          if (parsed) {
+            content = parsed.content;
+            gutterMode = 'grep-source';
+            gutterLines = parsed.gutterLines;
+          } else {
+            content = outputText;
+            gutterMode = 'default';
+            gutterLines = undefined;
+          }
+        }
         lang = 'text';
         break;
       }
@@ -4251,6 +4704,7 @@ function extractFileRead(payload: unknown, eventType: string) {
         path = typeof input?.path === 'string' ? input.path : undefined;
         toolTitle = formatListToolTitle(input);
         lang = 'text';
+        gutterMode = 'none';
         break;
       }
       case 'webfetch': {
@@ -4272,12 +4726,14 @@ function extractFileRead(payload: unknown, eventType: string) {
         toolTitle = typeof input?.description === 'string' ? input.description : undefined;
         content = formatTaskToolOutput(content);
         lang = 'markdown';
+        gutterMode = 'none';
         break;
       }
       case 'batch': {
         path = undefined;
         toolTitle = 'Batch execution';
         lang = 'text';
+        gutterMode = 'none';
         break;
       }
       case 'write': {
@@ -4322,6 +4778,7 @@ function extractFileRead(payload: unknown, eventType: string) {
         path = undefined;
         toolTitle = typeof state?.title === 'string' ? state.title : undefined;
         lang = 'text';
+        gutterMode = 'none';
         break;
       }
       default:
@@ -4340,6 +4797,9 @@ function extractFileRead(payload: unknown, eventType: string) {
       toolName: tool,
       toolTitle: toolTitle?.trim() ? toolTitle.trim() : undefined,
       lang,
+      wrapMode,
+      gutterMode,
+      gutterLines,
     };
   }
   const type =
@@ -5505,6 +5965,9 @@ function upsertToolEntry(
     toolName?: string;
     toolTitle?: string;
     lang?: string;
+    wrapMode?: FileReadEntry['toolWrapMode'];
+    gutterMode?: FileReadEntry['toolGutterMode'];
+    gutterLines?: string[];
   },
   eventType: string,
   langOverride?: string,
@@ -5563,6 +6026,9 @@ function upsertToolEntry(
               ? `# ${eventType}\n\n`
               : '';
         const nextContent = entry.content.trim().length > 0 ? entry.content : existing.content;
+        const nextWrapMode = entry.wrapMode ?? existing.toolWrapMode;
+        const nextGutterMode = entry.gutterMode ?? existing.toolGutterMode;
+        const nextGutterLines = entry.gutterLines ?? existing.toolGutterLines;
         const nextLang =
           langOverride ??
           entry.lang ??
@@ -5581,17 +6047,23 @@ function upsertToolEntry(
           toolKey,
           content: nextContent,
           scroll: false,
-          scrollDistance,
-          scrollDuration,
-          html: buildHtml(nextText, nextLang),
-          isWrite: entry.isWrite,
-          isMessage: false,
-          callId: entry.callId,
-          toolStatus: entry.toolStatus,
-          toolName: entry.toolName,
-          toolTitle: entry.toolTitle ?? existing.toolTitle,
-          toolLang: nextLang,
-        });
+            scrollDistance,
+            scrollDuration,
+            html: buildEntryHtml(nextText, nextLang, {
+              toolGutterMode: nextGutterMode,
+              toolGutterLines: nextGutterLines,
+            }),
+            isWrite: entry.isWrite,
+            isMessage: false,
+            callId: entry.callId,
+            toolStatus: entry.toolStatus,
+            toolName: entry.toolName,
+            toolTitle: entry.toolTitle ?? existing.toolTitle,
+            toolLang: nextLang,
+            toolWrapMode: nextWrapMode,
+            toolGutterMode: nextGutterMode,
+            toolGutterLines: nextGutterLines,
+          });
         toolIndexByCallId.set(entry.callId, existingIndex);
         scheduleToolScrollAnimation(toolKey);
         return;
@@ -5613,7 +6085,10 @@ function upsertToolEntry(
     scroll: false,
     scrollDistance,
     scrollDuration,
-    html: buildHtml(text, lang),
+    html: buildEntryHtml(text, lang, {
+      toolGutterMode: entry.gutterMode,
+      toolGutterLines: entry.gutterLines,
+    }),
     isWrite: entry.isWrite,
     isMessage: false,
     callId: entry.callId,
@@ -5621,6 +6096,9 @@ function upsertToolEntry(
     toolName: entry.toolName,
     toolTitle: entry.toolTitle,
     toolLang: lang,
+    toolWrapMode: entry.wrapMode,
+    toolGutterMode: entry.gutterMode,
+    toolGutterLines: entry.gutterLines,
     zIndex: nextWindowZ(),
   });
   if (entry.callId) toolIndexByCallId.set(entry.callId, queue.value.length - 1);
@@ -6145,6 +6623,15 @@ function connect() {
 }
 
 onMounted(() => {
+  syncCanvasTermMetrics();
+  if (typeof document !== 'undefined' && 'fonts' in document) {
+    void document.fonts.ready.then(() => {
+      syncCanvasTermMetrics();
+      shellSessionsByPtyId.forEach((_, ptyId) => {
+        scheduleShellFit(ptyId);
+      });
+    });
+  }
   hydrateShellPtyStorage();
   void fetchHomePath();
   void bootstrapSelections();
@@ -6188,7 +6675,10 @@ onMounted(() => {
               : guessLanguage(path));
         return {
           ...entry,
-          html: buildHtml(text, lang),
+          html: buildEntryHtml(text, lang, {
+            toolGutterMode: entry.toolGutterMode,
+            toolGutterLines: entry.toolGutterLines,
+          }),
         };
       });
     })
@@ -6197,11 +6687,17 @@ onMounted(() => {
     });
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
+  window.addEventListener('resize', syncCanvasTermMetrics);
   connect();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', handlePointerMove);
   window.removeEventListener('pointerup', handlePointerUp);
+  window.removeEventListener('resize', syncCanvasTermMetrics);
+  pendingToolScrollFrames.forEach((frame) => {
+    cancelAnimationFrame(frame);
+  });
+  pendingToolScrollFrames.clear();
   src.value?.close();
   disposeShellWindows({ preserve: true });
 });
@@ -6296,8 +6792,13 @@ onBeforeUnmount(() => {
   --dock-reserved: 0px;
   --tool-top-offset: 0px;
   --tool-area-height: 100%;
-  --term-width: 640px;
-  --term-height: 372px;
+  --term-font-family:
+    'Iosevka Term', 'Iosevka Fixed', 'JetBrains Mono', 'Cascadia Mono', 'SFMono-Regular', Menlo,
+    Consolas, 'Liberation Mono', monospace;
+  --term-font-size: 13px;
+  --term-line-height: 1.1;
+  --term-width: 670px;
+  --term-height: 386px;
 }
 
 .message-dock {
@@ -6410,9 +6911,8 @@ onBeforeUnmount(() => {
 
 .term {
   position: absolute;
-  font-size: 13px;
-  --term-line-height: 1.2;
-  --message-line-height: 1.2;
+  font-size: var(--term-font-size);
+  --message-line-height: var(--term-line-height);
   --term-border-color: #1f2937;
   width: var(--term-width);
   height: var(--term-height);
@@ -6420,8 +6920,7 @@ onBeforeUnmount(() => {
   color: #f3f4f6;
   border: 1px solid #1f2937;
   overflow: hidden;
-  font-family:
-    ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-family: var(--term-font-family);
   line-height: var(--term-line-height);
   padding: 0;
   z-index: 12;
@@ -6739,6 +7238,12 @@ onBeforeUnmount(() => {
   white-space: pre;
 }
 
+.shiki-host.wrap-soft :deep(.line) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .shiki-host :deep(.line:empty)::after {
   content: ' ';
 }
@@ -6773,6 +7278,21 @@ onBeforeUnmount(() => {
   width: 2.6em;
   text-align: right;
   color: #8a8a8a;
+}
+
+.shiki-host.no-gutter :deep(.line) {
+  padding-left: 0;
+}
+
+.shiki-host.no-gutter :deep(.line)::before {
+  content: '';
+  counter-increment: none;
+  width: 0;
+}
+
+.shiki-host.grep-gutter :deep(.line)::before {
+  counter-increment: none;
+  content: attr(data-gutter);
 }
 
 .shiki-host.is-message :deep(.line) {
