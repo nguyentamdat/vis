@@ -8,6 +8,7 @@
         :active-directory="selectedWorktreeDir"
         :active-directory-meta="worktreeMetaByDir"
         :sessions="filteredSessions"
+        :session-status-by-id="sessionStatusByIdRecord"
         :home-path="homePath"
         v-model:base-worktree="selectedProjectDirectory"
         v-model:active-directory="selectedWorktreeDir"
@@ -439,7 +440,10 @@ const runningToolIds = new Set<string>();
 const subagentSessionExpiry = new Map<string, number>();
 const messageSummaryTitleById = new Map<string, string>();
 const reasoningTitleBySessionId = new Map<string, string>();
-const sessionStatusById = new Map<string, 'busy' | 'idle'>();
+type SessionStatusType = 'busy' | 'idle';
+
+const sessionStatusById = new Map<string, SessionStatusType>();
+const sessionStatusVersion = ref(0);
 const reasoningCloseTimers = new Map<string, number>();
 const lastReasoningMessageIdByKey = new Map<string, string>();
 const messageAttachmentsById = new Map<string, MessageAttachment[]>();
@@ -447,6 +451,7 @@ const activeReasoningMessageIdByKey = new Map<string, string>();
 const finishedReasoningByKey = new Map<string, ReasoningFinish>();
 const globalEventHooks = new Set<(payload: unknown, eventType: string) => void>();
 let unregisterTreeGlobalHook: (() => void) | null = null;
+let unregisterSessionStatusGlobalHook: (() => void) | null = null;
 const dragState = ref<{
   entry: FileReadEntry;
   startX: number;
@@ -1204,6 +1209,53 @@ function syncNextWindowZIndex(entries: FileReadEntry[] = queue.value) {
     if (typeof entry.zIndex === 'number' && entry.zIndex > maxZ) maxZ = entry.zIndex;
   });
   nextWindowZIndex = maxZ;
+}
+
+const sessionStatusByIdRecord = computed<Record<string, SessionStatusType>>(() => {
+  const tick = sessionStatusVersion.value;
+  const next: Record<string, SessionStatusType> = {};
+  if (tick < 0) return next;
+  sessionStatusById.forEach((status, sessionId) => {
+    next[sessionId] = status;
+  });
+  return next;
+});
+
+function setSessionStatus(sessionId: string, status: SessionStatusType) {
+  if (!sessionId) return;
+  if (sessionStatusById.get(sessionId) === status) return;
+  sessionStatusById.set(sessionId, status);
+  sessionStatusVersion.value += 1;
+}
+
+function deleteSessionStatus(sessionId: string) {
+  if (!sessionStatusById.delete(sessionId)) return;
+  sessionStatusVersion.value += 1;
+}
+
+function clearSessionStatuses() {
+  if (sessionStatusById.size === 0) return;
+  sessionStatusById.clear();
+  sessionStatusVersion.value += 1;
+}
+
+function replaceSessionStatuses(entries: [string, SessionStatusType][]) {
+  const next = new Map(entries);
+  if (next.size === sessionStatusById.size) {
+    let isSame = true;
+    for (const [sessionId, status] of next) {
+      if (sessionStatusById.get(sessionId) !== status) {
+        isSame = false;
+        break;
+      }
+    }
+    if (isSame) return;
+  }
+  sessionStatusById.clear();
+  next.forEach((status, sessionId) => {
+    sessionStatusById.set(sessionId, status);
+  });
+  sessionStatusVersion.value += 1;
 }
 
 function nextWindowZ() {
@@ -2036,6 +2088,7 @@ function setSessions(list: SessionInfo[]) {
 function clearSessions() {
   sessions.value = [];
   sessionParentById.value = new Map();
+  clearSessionStatuses();
 }
 
 function upsertSessionGraph(info: SessionInfo) {
@@ -2308,6 +2361,7 @@ async function deleteSession(sessionId: string) {
     await opencodeApi.deleteSession(OPENCODE_BASE_URL, sessionId, directory || undefined);
     if (selectedSessionId.value === sessionId) selectedSessionId.value = '';
     removeSessionFromGraph(sessionId);
+    deleteSessionStatus(sessionId);
     sessions.value = sessions.value.filter((session) => session.id !== sessionId);
     void refreshSessionsForDirectory(activeDirectory.value || undefined);
   } catch (error) {
@@ -2464,6 +2518,7 @@ async function bootstrapSelections() {
     }
   } finally {
     isBootstrapping.value = false;
+    void fetchSessionStatus(activeDirectory.value || undefined);
     if (activeDirectory.value) {
       void loadTreePath('.');
       void refreshSessionDiff();
@@ -2586,7 +2641,6 @@ async function fetchCommands(directory?: string) {
 
 async function fetchSessionStatus(directory?: string) {
   const requestId = ++sessionStatusRequestId;
-  const selectedAtRequest = selectedSessionId.value;
   const directoryAtRequest = directory ?? '';
   try {
     const data = (await opencodeApi.getSessionStatusMap(
@@ -2594,17 +2648,17 @@ async function fetchSessionStatus(directory?: string) {
       directory,
     )) as Record<string, { type?: string }>;
     if (requestId !== sessionStatusRequestId) return;
-    if (selectedAtRequest !== selectedSessionId.value) return;
     if (directoryAtRequest !== (activeDirectory.value || '')) return;
-    sessionStatusById.clear();
+    const nextEntries: [string, SessionStatusType][] = [];
     Object.entries(data ?? {}).forEach(([sessionId, status]) => {
       const type = typeof status?.type === 'string' ? status.type : '';
       if (type === 'busy' || type === 'idle') {
-        sessionStatusById.set(sessionId, type);
+        nextEntries.push([sessionId, type]);
       } else if (type === 'retry') {
-        sessionStatusById.set(sessionId, 'busy');
+        nextEntries.push([sessionId, 'busy']);
       }
     });
+    replaceSessionStatuses(nextEntries);
     if (selectedSessionId.value) {
       const nextStatus = sessionStatusById.get(selectedSessionId.value);
       selectedSessionStatus.value = nextStatus ?? '';
@@ -3896,6 +3950,7 @@ watch(
     if (!value) return;
     void fetchCommands(value);
     void refreshSessionsForDirectory(value);
+    void fetchSessionStatus(value || undefined);
   },
   { immediate: true },
 );
@@ -6280,8 +6335,13 @@ function extractSessionStatus(payload: unknown, eventType: string) {
     (record.event as string | undefined) ??
     (nestedPayload?.type as string | undefined) ??
     eventType;
+  if (!type) return null;
 
-  if (!type || !type.toLowerCase().includes('session.status')) return null;
+  const normalized = normalizeEventType(type);
+  if (normalized === 'sessionidle') {
+    return { status: 'idle' as const };
+  }
+  if (!type.toLowerCase().includes('session.status')) return null;
 
   const status =
     (properties?.status as Record<string, unknown> | undefined) ??
@@ -6296,6 +6356,50 @@ function extractSessionStatus(payload: unknown, eventType: string) {
   }
 
   return statusType ? { status: statusType } : null;
+}
+
+function applySessionStatusEvent(payload: unknown, eventType: string) {
+  const sessionStatus = extractSessionStatus(payload, eventType);
+  if (!sessionStatus) return;
+
+  const sessionId = extractSessionId(payload);
+  const isSelectedSessionEvent = Boolean(
+    sessionId && selectedSessionId.value && sessionId === selectedSessionId.value,
+  );
+  const isAllowedSessionEvent = Boolean(
+    sessionId && selectedSessionId.value && allowedSessionIds.value.has(sessionId),
+  );
+
+  if (sessionStatus.status === 'busy' || sessionStatus.status === 'idle') {
+    const nextStatus = sessionStatus.status as SessionStatusType;
+    if (sessionId) setSessionStatus(sessionId, nextStatus);
+    if (isSelectedSessionEvent && sessionId) {
+      retryStatus.value = null;
+      selectedSessionStatus.value = nextStatus;
+      updateReasoningExpiry(sessionId, nextStatus);
+    } else if (isAllowedSessionEvent && sessionId) {
+      updateSubagentExpiry(sessionId, nextStatus);
+      updateReasoningExpiry(sessionId, nextStatus);
+    }
+    return;
+  }
+
+  if (sessionStatus.status !== 'retry') return;
+
+  if (sessionId) {
+    setSessionStatus(sessionId, 'busy');
+  }
+  if (!isSelectedSessionEvent || !sessionId) return;
+
+  selectedSessionStatus.value = 'busy';
+  updateReasoningExpiry(sessionId, 'busy');
+  if (sessionStatus.message && typeof sessionStatus.next === 'number') {
+    retryStatus.value = {
+      message: sessionStatus.message,
+      next: sessionStatus.next,
+      attempt: sessionStatus.attempt || 1,
+    };
+  }
 }
 
 function extractPtyEvent(payload: unknown, eventType: string) {
@@ -7298,6 +7402,7 @@ function connect() {
         const matchesWorktree = matchesSelectedWorktree(sessionInfo);
         if (isSessionDeleteEvent(resolvedEventType)) {
           removeSessionFromGraph(sessionInfo.id);
+          deleteSessionStatus(sessionInfo.id);
           if (matchesWorktree) {
             sessions.value = sessions.value.filter((session) => session.id !== sessionInfo.id);
           }
@@ -7324,40 +7429,6 @@ function connect() {
 
     const sessionId = extractSessionId(payload);
     if (sessionId && selectedSessionId.value && !allowedSessionIds.value.has(sessionId)) return;
-
-    const sessionStatus = extractSessionStatus(payload, resolvedEventType);
-    if (sessionStatus) {
-      const isSelectedSessionEvent = Boolean(
-        sessionId && selectedSessionId.value && sessionId === selectedSessionId.value,
-      );
-      const isAllowedSessionEvent = Boolean(
-        sessionId && selectedSessionId.value && allowedSessionIds.value.has(sessionId),
-      );
-      if (sessionStatus.status === 'busy' || sessionStatus.status === 'idle') {
-        const nextStatus = sessionStatus.status as 'busy' | 'idle';
-        if (sessionId) sessionStatusById.set(sessionId, nextStatus);
-        if (isSelectedSessionEvent && sessionId) {
-          retryStatus.value = null;
-          selectedSessionStatus.value = nextStatus;
-          updateReasoningExpiry(sessionId, nextStatus);
-        } else if (isAllowedSessionEvent && sessionId) {
-          updateSubagentExpiry(sessionId, nextStatus);
-          updateReasoningExpiry(sessionId, nextStatus);
-        }
-      } else if (sessionStatus.status === 'retry') {
-        if (
-          isSelectedSessionEvent &&
-          sessionStatus.message &&
-          typeof sessionStatus.next === 'number'
-        ) {
-          retryStatus.value = {
-            message: sessionStatus.message,
-            next: sessionStatus.next,
-            attempt: sessionStatus.attempt || 1,
-          };
-        }
-      }
-    }
 
     if (resolvedEventType && resolvedEventType.startsWith('session.diff')) {
       const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
@@ -7814,6 +7885,15 @@ onMounted(() => {
       updateSessionDiffState(entries);
     }
   });
+  unregisterSessionStatusGlobalHook?.();
+  unregisterSessionStatusGlobalHook = registerGlobalEventHook((payload, eventType) => {
+    const normalized = normalizeEventType(eventType);
+    if (normalized === 'serverconnected') {
+      void fetchSessionStatus(activeDirectory.value || undefined);
+      return;
+    }
+    applySessionStatusEvent(payload, eventType);
+  });
   connect();
 });
 onBeforeUnmount(() => {
@@ -7827,6 +7907,8 @@ onBeforeUnmount(() => {
   pendingToolScrollFrames.clear();
   unregisterTreeGlobalHook?.();
   unregisterTreeGlobalHook = null;
+  unregisterSessionStatusGlobalHook?.();
+  unregisterSessionStatusGlobalHook = null;
   src.value?.close();
   disposeShellWindows({ preserve: true });
 });

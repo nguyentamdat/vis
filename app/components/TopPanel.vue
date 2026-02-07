@@ -86,6 +86,9 @@
             <div class="dropdown-list">
               <div v-if="sessions.length === 0" class="dropdown-empty">No sessions</div>
               <DropdownItem v-for="session in sessions" :key="session.id" :value="session.id">
+                <span class="session-status-icon" :title="sessionStatusText(session.id)">
+                  {{ sessionStatusIcon(session.id) }}
+                </span>
                 <span class="dropdown-item-label">{{ sessionLabel(session) }}</span>
                 <button
                   type="button"
@@ -127,6 +130,7 @@ const props = defineProps<{
   activeDirectory: string;
   activeDirectoryMeta?: Record<string, { branch?: string }>;
   sessions: SessionInfo[];
+  sessionStatusById?: Record<string, 'busy' | 'idle'>;
   selectedSessionId: string;
   homePath?: string;
 }>();
@@ -168,13 +172,26 @@ const selectedActiveDirectoryLabel = computed(() => {
 
 const selectedSessionLabel = computed(() => {
   const session = props.sessions.find((item) => item.id === props.selectedSessionId);
-  return session ? sessionLabel(session) : '';
+  if (!session) return '';
+  return `${sessionStatusIcon(session.id)} ${sessionLabel(session)}`;
 });
 const copyToastVisible = ref(false);
 let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
 
 function sessionLabel(session: SessionInfo) {
   return session.title || session.slug || session.id;
+}
+
+function sessionStatusIcon(sessionId: string) {
+  const status = props.sessionStatusById?.[sessionId];
+  if (status === 'busy') return '🤔';
+  return '🟢';
+}
+
+function sessionStatusText(sessionId: string) {
+  const status = props.sessionStatusById?.[sessionId];
+  if (status === 'busy') return 'busy';
+  return 'idle';
 }
 
 function activeDirectoryLabel(directory: string) {
@@ -304,6 +321,13 @@ function handleSessionDelete(id: string, close?: () => void) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-status-icon {
+  flex: 0 0 auto;
+  width: 1.5em;
+  text-align: center;
+  opacity: 0.95;
 }
 
 .dropdown-actions {
