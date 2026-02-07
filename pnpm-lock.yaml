@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@kikuchan/hexdump':
+        specifier: 0.1.0-alpha.9
+        version: 0.1.0-alpha.9
       '@xterm/addon-fit':
         specifier: ^0.10.0
         version: 0.10.0(@xterm/xterm@6.0.0)
@@ -260,6 +263,9 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
+
+  '@kikuchan/hexdump@0.1.0-alpha.9':
+    resolution: {integrity: sha512-zoAKDgMsTVDW57NXL2VTrFM5Y+ZNU9A/slFYAk8KH8MPbI1cKayOu0Xcij9MkyAwfCxcRQbEZruTYfjCSXhdyA==}
 
   '@oxfmt/darwin-arm64@0.28.0':
     resolution: {integrity: sha512-jmUfF7cNJPw57bEK7sMIqrYRgn4LH428tSgtgLTCtjuGuu1ShREyrkeB7y8HtkXRfhBs4lVY+HMLhqElJvZ6ww==}
@@ -1000,6 +1006,8 @@ snapshots:
       minimatch: 9.0.5
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
+
+  '@kikuchan/hexdump@0.1.0-alpha.9': {}
 
   '@oxfmt/darwin-arm64@0.28.0':
     optional: true

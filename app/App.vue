@@ -21,8 +21,8 @@
     </header>
     <main ref="outputEl" class="app-output">
       <div class="output-workspace">
-        <div class="tool-window-layer" :class="{ 'todo-collapsed': todoPanelCollapsed }">
-          <div class="output-split" :class="{ 'todo-collapsed': todoPanelCollapsed }">
+        <div class="tool-window-layer" :class="{ 'todo-collapsed': sidePanelCollapsed }">
+          <div class="output-split" :class="{ 'todo-collapsed': sidePanelCollapsed }">
             <OutputPanel
               ref="outputPanelRef"
               class="output-panel"
@@ -39,12 +39,22 @@
               @fork-message="handleForkMessage"
               @revert-message="handleRevertMessage"
             />
-            <TodoPanel
+            <SidePanel
               class="todo-panel"
-              :collapsed="todoPanelCollapsed"
-              :sessions="todoPanelSessions"
-              :total-count="todoPanelCount"
-              @toggle-collapse="toggleTodoPanelCollapsed"
+              :collapsed="sidePanelCollapsed"
+              :active-tab="sidePanelActiveTab"
+              :todo-sessions="todoPanelSessions"
+              :tree-nodes="treeNodes"
+              :expanded-tree-paths="expandedTreePaths"
+              :selected-tree-path="selectedTreePath"
+              :tree-loading="treeLoading"
+              :tree-error="treeError"
+              :tree-status-by-path="treeStatusByPath"
+              @toggle-collapse="toggleSidePanelCollapsed"
+              @change-tab="setSidePanelTab"
+              @toggle-dir="toggleTreeDirectory"
+              @select-file="selectTreeFile"
+              @open-file="openFileViewer"
             />
           </div>
           <div ref="toolWindowCanvasEl" class="tool-window-canvas">
@@ -68,6 +78,18 @@
                 :get-question-error="getQuestionError"
                 :on-question-reply="handleQuestionReply"
                 :on-question-reject="handleQuestionReject"
+              />
+              <FileViewerWindow
+                v-for="q in fileViewerQueue"
+                :key="q.toolKey ?? q.path ?? q.time"
+                :entry="q"
+                :title="getEntryTitle(q)"
+                :on-focus-entry="focusTerm"
+                :on-drag-entry="startTermDrag"
+                :on-resize-entry="startTermResize"
+                :on-floating-scroll-entry="handleFloatingScroll"
+                :on-floating-wheel-entry="handleFloatingWheel"
+                :on-close-entry="closeFileViewer"
               />
             </TransitionGroup>
           </div>
@@ -120,7 +142,9 @@ import { Terminal } from '@xterm/xterm';
 import InputPanel from './components/InputPanel.vue';
 import OutputPanel from './components/OutputPanel.vue';
 import ProjectPicker from './components/ProjectPicker.vue';
-import TodoPanel from './components/TodoPanel.vue';
+import hexdump from '@kikuchan/hexdump';
+import FileViewerWindow from './components/FileViewerWindow.vue';
+import SidePanel from './components/SidePanel.vue';
 import ToolWindow from './components/ToolWindow.vue';
 import TopPanel from './components/TopPanel.vue';
 import { useOutputPanelFollow } from './composables/useOutputPanelFollow';
@@ -135,7 +159,8 @@ const TOOL_COMPLETE_TTL_MS = 2_000;
 const TOOL_SCROLL_SPEED_PX_S = 2000;
 const TOOL_SCROLL_HOLD_MS = 250;
 const SUBAGENT_ACTIVE_TTL_MS = 60 * 60 * 1000;
-const TODO_PANEL_COLLAPSED_STORAGE_KEY = 'opencode.todoPanelCollapsed.v1';
+const SIDE_PANEL_COLLAPSED_STORAGE_KEY = 'opencode.sidePanelCollapsed.v1';
+const SIDE_PANEL_TAB_STORAGE_KEY = 'opencode.sidePanelTab.v1';
 const SHELL_WINDOW_Z_BASE = 1_000_000;
 const PERMISSION_WINDOW_WIDTH = 760;
 const PERMISSION_WINDOW_HEIGHT = 340;
@@ -145,6 +170,11 @@ const QUESTION_WINDOW_WIDTH = 760;
 const QUESTION_WINDOW_HEIGHT = 380;
 const QUESTION_WINDOW_MIN_WIDTH = 560;
 const QUESTION_WINDOW_MIN_HEIGHT = 240;
+const FILE_VIEWER_WINDOW_WIDTH = 840;
+const FILE_VIEWER_WINDOW_HEIGHT = 520;
+const FILE_VIEWER_WINDOW_MIN_WIDTH = 460;
+const FILE_VIEWER_WINDOW_MIN_HEIGHT = 260;
+const TREE_REFRESH_DEBOUNCE_MS = 400;
 const TERM_COLUMNS = 80;
 const TERM_ROWS = 25;
 const TERM_FONT_SIZE_PX = 13;
@@ -235,6 +265,7 @@ type FileReadEntry = {
   shellTitle?: string;
   permissionRequest?: PermissionRequest;
   questionRequest?: QuestionRequest;
+  isBinary?: boolean;
 };
 
 type TodoItem = {
@@ -251,6 +282,33 @@ type TodoPanelSession = {
   todos: TodoItem[];
   loading: boolean;
   error?: string;
+};
+
+type TreeNode = {
+  name: string;
+  path: string;
+  type: 'directory' | 'file';
+  children?: TreeNode[];
+  loaded?: boolean;
+};
+
+type FileNode = {
+  name?: string;
+  path: string;
+  type?: string;
+};
+
+type FileStatus = {
+  path?: string;
+  status?: 'added' | 'modified' | 'deleted';
+  added?: number;
+  removed?: number;
+};
+
+type FileContentResponse = {
+  content?: string;
+  encoding?: string;
+  type?: 'text' | 'binary';
 };
 
 type PermissionRequest = {
@@ -371,6 +429,7 @@ const messageAttachmentsById = new Map<string, MessageAttachment[]>();
 const activeReasoningMessageIdByKey = new Map<string, string>();
 const finishedReasoningByKey = new Map<string, ReasoningFinish>();
 const globalEventHooks = new Set<(payload: unknown, eventType: string) => void>();
+let unregisterTreeGlobalHook: (() => void) | null = null;
 const dragState = ref<{
   entry: FileReadEntry;
   startX: number;
@@ -425,11 +484,22 @@ const permissionErrorById = ref<Record<string, string>>({});
 const questionSendingById = ref<Record<string, boolean>>({});
 const questionErrorById = ref<Record<string, string>>({});
 const pendingWorktreeMetaByDir = new Map<string, VcsInfo>();
-const todoPanelCollapsed = ref(readTodoPanelCollapsed());
+const sidePanelCollapsed = ref(readSidePanelCollapsed());
+const sidePanelActiveTab = ref(readSidePanelTab());
 const todosBySessionId = ref<Record<string, TodoItem[]>>({});
 const todoLoadingBySessionId = ref<Record<string, boolean>>({});
 const todoErrorBySessionId = ref<Record<string, string>>({});
 let todoReloadRequestId = 0;
+const treeNodes = ref<TreeNode[]>([]);
+const expandedTreePathSet = ref(new Set<string>());
+const selectedTreePath = ref('');
+const treeLoading = ref(false);
+const treeError = ref('');
+const treeStatusByPath = ref<Record<string, 'added' | 'modified' | 'deleted'>>({});
+let treeRefreshTimer: number | null = null;
+let treeRequestId = 0;
+let treeStatusRequestId = 0;
+const fileViewerQueue = ref<FileReadEntry[]>([]);
 
 type ProjectInfo = {
   id: string;
@@ -633,6 +703,8 @@ const todoPanelSessions = computed(() => {
   });
   return visible;
 });
+
+const expandedTreePaths = computed(() => Array.from(expandedTreePathSet.value));
 
 const canSend = computed(() =>
   Boolean(
@@ -888,27 +960,48 @@ function removeComposerDraft(contextKey: string) {
   writeComposerDraftStore(store);
 }
 
-function readTodoPanelCollapsed() {
+function readSidePanelCollapsed() {
   if (typeof window === 'undefined') return false;
-  const raw = window.localStorage.getItem(TODO_PANEL_COLLAPSED_STORAGE_KEY);
+  const raw = window.localStorage.getItem(SIDE_PANEL_COLLAPSED_STORAGE_KEY);
   return raw === '1';
 }
 
-function persistTodoPanelCollapsed(value: boolean) {
+function persistSidePanelCollapsed(value: boolean) {
   if (typeof window === 'undefined') return;
   try {
-    window.localStorage.setItem(TODO_PANEL_COLLAPSED_STORAGE_KEY, value ? '1' : '0');
+    window.localStorage.setItem(SIDE_PANEL_COLLAPSED_STORAGE_KEY, value ? '1' : '0');
   } catch {
     return;
   }
 }
 
-function toggleTodoPanelCollapsed() {
-  todoPanelCollapsed.value = !todoPanelCollapsed.value;
-  persistTodoPanelCollapsed(todoPanelCollapsed.value);
+function readSidePanelTab() {
+  if (typeof window === 'undefined') return 'todo' as const;
+  const raw = window.localStorage.getItem(SIDE_PANEL_TAB_STORAGE_KEY);
+  return raw === 'tree' ? 'tree' : 'todo';
+}
+
+function persistSidePanelTab(value: 'todo' | 'tree') {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(SIDE_PANEL_TAB_STORAGE_KEY, value);
+  } catch {
+    return;
+  }
+}
+
+function toggleSidePanelCollapsed() {
+  sidePanelCollapsed.value = !sidePanelCollapsed.value;
+  persistSidePanelCollapsed(sidePanelCollapsed.value);
   nextTick(() => {
     scheduleShellFitAll();
   });
+}
+
+function setSidePanelTab(value: 'todo' | 'tree') {
+  if (sidePanelActiveTab.value === value) return;
+  sidePanelActiveTab.value = value;
+  persistSidePanelTab(value);
 }
 
 function resolveProjectIdForSession(sessionId: string) {
@@ -1562,16 +1655,21 @@ function startTermResize(entry: FileReadEntry, event: PointerEvent) {
   const offsetTop = termRect.top - canvasRect.top;
   const maxWidth = Math.max(200, canvasRect.width - offsetLeft);
   const maxHeight = Math.max(200, toolTop + toolAreaHeight - offsetTop);
+  const isFileViewer = entry.toolKey?.startsWith('file-viewer:');
   const minWidth = entry.isPermission
     ? PERMISSION_WINDOW_MIN_WIDTH
     : entry.isQuestion
       ? QUESTION_WINDOW_MIN_WIDTH
-      : 320;
+      : isFileViewer
+        ? FILE_VIEWER_WINDOW_MIN_WIDTH
+        : 320;
   const minHeight = entry.isPermission
     ? PERMISSION_WINDOW_MIN_HEIGHT
     : entry.isQuestion
       ? QUESTION_WINDOW_MIN_HEIGHT
-      : 220;
+      : isFileViewer
+        ? FILE_VIEWER_WINDOW_MIN_HEIGHT
+        : 220;
   resizeState.value = {
     entry,
     startX: event.clientX,
@@ -2226,6 +2324,10 @@ async function bootstrapSelections() {
     }
   } finally {
     isBootstrapping.value = false;
+    if (activeDirectory.value) {
+      void loadTreePath('.');
+      void refreshTreeStatus();
+    }
   }
 }
 
@@ -3536,14 +3638,26 @@ watch(selectedModel, () => {
 watch(activeDirectory, (directory) => {
   if (isBootstrapping.value) return;
   const activePath = directory || undefined;
-  if (!activePath) return;
+  if (!activePath) {
+    treeNodes.value = [];
+    expandedTreePathSet.value = new Set();
+    selectedTreePath.value = '';
+    treeStatusByPath.value = {};
+    return;
+  }
   if (selectedWorktreeDir.value && activePath !== selectedWorktreeDir.value) return;
   void fetchCommands(activePath);
   void reloadTodosForAllowedSessions();
+  void loadTreePath('.');
+  void refreshTreeStatus();
 });
 
-watch(todoPanelCollapsed, () => {
-  persistTodoPanelCollapsed(todoPanelCollapsed.value);
+watch(sidePanelCollapsed, () => {
+  persistSidePanelCollapsed(sidePanelCollapsed.value);
+});
+
+watch(sidePanelActiveTab, () => {
+  persistSidePanelTab(sidePanelActiveTab.value);
 });
 
 watch(
@@ -4160,6 +4274,327 @@ async function reloadTodosForAllowedSessions() {
   todoLoadingBySessionId.value = {};
   todoErrorBySessionId.value = nextErrors;
   todosBySessionId.value = nextTodos;
+}
+
+function normalizeRelativePath(path: string) {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === '.') return '.';
+  const withoutPrefix = trimmed
+    .replace(/^\.\//, '')
+    .replace(/^\//, '')
+    .replace(/^(\.\.\/)+/, '');
+  const normalized = withoutPrefix.replace(/\/+/g, '/').replace(/\/$/, '');
+  return normalized || '.';
+}
+
+function toRelativePath(path: string, directory: string) {
+  const normalizedDirectory = normalizeDirectory(directory);
+  const normalizedPath = normalizeDirectory(path);
+  if (normalizedPath === normalizedDirectory) return '.';
+  const prefix = `${normalizedDirectory}/`;
+  if (normalizedPath.startsWith(prefix)) return normalizeRelativePath(normalizedPath.slice(prefix.length));
+  return normalizeRelativePath(normalizedPath);
+}
+
+function normalizeFileNode(item: unknown, directory: string): FileNode | null {
+  if (!item || typeof item !== 'object') return null;
+  const record = item as Record<string, unknown>;
+  const rawPath =
+    (typeof record.path === 'string' && record.path) ||
+    (typeof record.name === 'string' && record.name) ||
+    undefined;
+  if (!rawPath) return null;
+  const path = toRelativePath(rawPath, directory);
+  const name =
+    (typeof record.name === 'string' && record.name) ||
+    (path === '.' ? '.' : path.split('/').at(-1)) ||
+    path;
+  const rawType = typeof record.type === 'string' ? record.type.toLowerCase() : '';
+  const type = rawType.includes('dir') ? 'directory' : 'file';
+  return { path, name, type };
+}
+
+function sortTreeNodes(nodes: TreeNode[]) {
+  nodes.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return nodes;
+}
+
+function buildTreeNodes(items: unknown[], directory: string, parentPath: string) {
+  const unique = new Map<string, TreeNode>();
+  items.forEach((item) => {
+    const node = normalizeFileNode(item, directory);
+    if (!node) return;
+    if (node.path === parentPath || node.path === '.') return;
+    const relativeToParent =
+      parentPath === '.'
+        ? node.path
+        : node.path.startsWith(`${parentPath}/`)
+          ? node.path.slice(parentPath.length + 1)
+          : node.path.includes('/')
+            ? ''
+            : node.path;
+    if (!relativeToParent) return;
+    const name = relativeToParent.split('/')[0];
+    const path = parentPath === '.' ? name : `${parentPath}/${name}`;
+    const isLeaf = !relativeToParent.includes('/');
+    const existing = unique.get(path);
+    if (existing) {
+      if (existing.type === 'file' && !isLeaf) {
+        existing.type = 'directory';
+        existing.children = [];
+      }
+      return;
+    }
+    unique.set(path, {
+      name,
+      path,
+      type: isLeaf ? node.type ?? 'file' : 'directory',
+      children: isLeaf && node.type !== 'directory' ? undefined : [],
+      loaded: false,
+    });
+  });
+  return sortTreeNodes(Array.from(unique.values()));
+}
+
+function updateTreeNodeChildren(nodes: TreeNode[], targetPath: string, children: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.path === targetPath) {
+      return {
+        ...node,
+        type: 'directory',
+        children,
+        loaded: true,
+      };
+    }
+    if (node.children?.length) {
+      return { ...node, children: updateTreeNodeChildren(node.children, targetPath, children) };
+    }
+    return node;
+  });
+}
+
+function findTreeNodeByPath(nodes: TreeNode[], targetPath: string): TreeNode | null {
+  for (const node of nodes) {
+    if (node.path === targetPath) return node;
+    if (!node.children?.length) continue;
+    const child = findTreeNodeByPath(node.children, targetPath);
+    if (child) return child;
+  }
+  return null;
+}
+
+function aggregateTreeStatuses() {
+  const fileStatuses = treeStatusByPath.value;
+  const next: Record<string, 'added' | 'modified' | 'deleted'> = { ...fileStatuses };
+  const priority = { added: 1, modified: 2, deleted: 3 } as const;
+  Object.entries(fileStatuses).forEach(([path, status]) => {
+    if (path === '.') return;
+    const segments = path.split('/');
+    while (segments.length > 1) {
+      segments.pop();
+      const parent = segments.join('/');
+      const current = next[parent];
+      if (!current || priority[status] > priority[current]) {
+        next[parent] = status;
+      }
+    }
+  });
+  treeStatusByPath.value = next;
+}
+
+async function loadTreePath(path: string) {
+  const directory = activeDirectory.value.trim();
+  if (!directory) {
+    treeNodes.value = [];
+    return;
+  }
+  const requestId = ++treeRequestId;
+  if (path === '.') {
+    treeLoading.value = true;
+    treeError.value = '';
+  }
+  try {
+    const data = await opencodeApi.listFiles(OPENCODE_BASE_URL, {
+      directory,
+      path,
+    });
+    if (requestId !== treeRequestId) return;
+    const list = Array.isArray(data) ? data : [];
+    const children = buildTreeNodes(list, directory, path);
+    if (path === '.') {
+      treeNodes.value = children;
+    } else {
+      treeNodes.value = updateTreeNodeChildren(treeNodes.value, path, children);
+    }
+  } catch (error) {
+    if (requestId !== treeRequestId) return;
+    treeError.value = `Tree load failed: ${toErrorMessage(error)}`;
+  } finally {
+    if (path === '.') treeLoading.value = false;
+  }
+}
+
+async function refreshTreeStatus() {
+  const directory = activeDirectory.value.trim();
+  if (!directory) {
+    treeStatusByPath.value = {};
+    return;
+  }
+  const requestId = ++treeStatusRequestId;
+  try {
+    const data = (await opencodeApi.listFileStatus(OPENCODE_BASE_URL, {
+      directory,
+    })) as FileStatus[];
+    if (requestId !== treeStatusRequestId) return;
+    const map: Record<string, 'added' | 'modified' | 'deleted'> = {};
+    (Array.isArray(data) ? data : []).forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      if (!item.path || !item.status) return;
+      const relativePath = toRelativePath(item.path, directory);
+      if (relativePath === '.') return;
+      map[relativePath] = item.status;
+    });
+    treeStatusByPath.value = map;
+    aggregateTreeStatuses();
+  } catch {
+    if (requestId !== treeStatusRequestId) return;
+    treeStatusByPath.value = {};
+  }
+}
+
+function queueTreeStatusRefresh() {
+  if (treeRefreshTimer !== null) window.clearTimeout(treeRefreshTimer);
+  treeRefreshTimer = window.setTimeout(() => {
+    treeRefreshTimer = null;
+    void refreshTreeStatus();
+  }, TREE_REFRESH_DEBOUNCE_MS);
+}
+
+function toggleTreeDirectory(path: string) {
+  const next = new Set(expandedTreePathSet.value);
+  if (next.has(path)) {
+    next.delete(path);
+    expandedTreePathSet.value = next;
+    return;
+  }
+  next.add(path);
+  expandedTreePathSet.value = next;
+  const node = findTreeNodeByPath(treeNodes.value, path);
+  if (node?.loaded) return;
+  void loadTreePath(path);
+}
+
+function selectTreeFile(path: string) {
+  selectedTreePath.value = path;
+}
+
+function toUint8ArrayFromBase64(input: string) {
+  const decoded = atob(input);
+  const bytes = new Uint8Array(decoded.length);
+  for (let i = 0; i < decoded.length; i += 1) {
+    bytes[i] = decoded.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function toUint8ArrayFromText(input: string) {
+  return new TextEncoder().encode(input);
+}
+
+function getFileViewerByPath(path: string) {
+  return fileViewerQueue.value.find((entry) => entry.path === path);
+}
+
+function closeFileViewer(entry: FileReadEntry) {
+  const index = fileViewerQueue.value.findIndex((item) => item.toolKey === entry.toolKey);
+  if (index >= 0) fileViewerQueue.value.splice(index, 1);
+}
+
+async function openFileViewer(path: string) {
+  const existing = getFileViewerByPath(path);
+  if (existing) {
+    bringToFront(existing);
+    return;
+  }
+  const metrics = getCanvasMetrics();
+  const x = metrics ? clamp(metrics.canvasRect.width * 0.18, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 32;
+  const y = metrics ? clamp(metrics.toolAreaHeight * 0.14, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 32;
+  const entry: FileReadEntry = {
+    time: Date.now(),
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    x,
+    y,
+    header: '',
+    path,
+    content: '',
+    scroll: false,
+    scrollDistance: 0,
+    scrollDuration: 0,
+    html: buildEntryHtml('Loading...', 'text', { toolGutterMode: 'none' }),
+    isWrite: false,
+    isMessage: false,
+    toolName: 'read',
+    toolTitle: path,
+    toolLang: guessLanguage(path),
+    toolGutterMode: 'default',
+    toolKey: `file-viewer:${path}`,
+    width: FILE_VIEWER_WINDOW_WIDTH,
+    height: FILE_VIEWER_WINDOW_HEIGHT,
+    isBinary: false,
+  };
+  bringToFront(entry);
+  fileViewerQueue.value.push(entry);
+
+  const directory = activeDirectory.value.trim();
+  if (!directory) {
+    entry.html = buildEntryHtml('No active directory selected.', 'text', { toolGutterMode: 'none' });
+    entry.toolGutterMode = 'none';
+    return;
+  }
+
+  try {
+    const data = (await opencodeApi.readFileContent(OPENCODE_BASE_URL, {
+      directory,
+      path,
+    })) as FileContentResponse;
+    const type = data?.type === 'binary' ? 'binary' : 'text';
+    const encoding = typeof data?.encoding === 'string' ? data.encoding : 'utf-8';
+    const content = typeof data?.content === 'string' ? data.content : '';
+    if (type === 'binary') {
+      if (!content) {
+        entry.html = buildEntryHtml(
+          'Binary content is not included in this API response.\nUnable to render hexdump for this file.',
+          'text',
+          { toolGutterMode: 'none' },
+        );
+        entry.toolGutterMode = 'none';
+        entry.isBinary = false;
+        return;
+      }
+      const bytes = encoding === 'base64' ? toUint8ArrayFromBase64(content) : toUint8ArrayFromText(content);
+      const dump = hexdump(bytes, { color: 'html' });
+      entry.html = `<pre class="shiki"><code>${dump}</code></pre>`;
+      entry.toolGutterMode = 'none';
+      entry.isBinary = true;
+      return;
+    }
+    const lang = guessLanguage(path);
+    const textContent = encoding === 'base64' ? atob(content) : content;
+    entry.content = textContent;
+    entry.html = buildEntryHtml(textContent, lang, { toolGutterMode: 'default' });
+    entry.toolLang = lang;
+    entry.toolGutterMode = 'default';
+    entry.isBinary = false;
+  } catch (error) {
+    entry.html = buildEntryHtml(`File load failed: ${toErrorMessage(error)}`, 'text', {
+      toolGutterMode: 'none',
+    });
+    entry.toolGutterMode = 'none';
+    entry.isBinary = false;
+  }
 }
 
 function extractTodoUpdated(payload: unknown, eventType: string) {
@@ -6165,6 +6600,38 @@ function notifyGlobalEventHooks(payload: unknown, eventType: string) {
   });
 }
 
+function extractEventDirectory(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return '';
+  const record = payload as Record<string, unknown>;
+  const nestedPayload =
+    record.payload && typeof record.payload === 'object'
+      ? (record.payload as Record<string, unknown>)
+      : undefined;
+  const properties =
+    (nestedPayload?.properties && typeof nestedPayload.properties === 'object'
+      ? (nestedPayload.properties as Record<string, unknown>)
+      : undefined) ??
+    (record.properties && typeof record.properties === 'object'
+      ? (record.properties as Record<string, unknown>)
+      : undefined);
+  const value =
+    (typeof record.directory === 'string' ? record.directory : undefined) ??
+    (typeof nestedPayload?.directory === 'string' ? nestedPayload.directory : undefined) ??
+    (typeof properties?.directory === 'string' ? properties.directory : undefined);
+  return value?.trim() ?? '';
+}
+
+function shouldRefreshTreeStatus(eventType: string) {
+  const normalized = normalizeEventType(eventType);
+  return (
+    normalized === 'filewatcherupdated' ||
+    normalized === 'fileedited' ||
+    normalized === 'vcsbranchupdated' ||
+    normalized === 'projectupdated' ||
+    normalized === 'serverconnected'
+  );
+}
+
 const src = shallowRef<EventSource>();
 function connect() {
   if (src.value) return;
@@ -6647,6 +7114,10 @@ onMounted(() => {
   fetchAgents();
   fetchSessionStatus(activeDirectory.value || undefined);
   fetchCommands(activeDirectory.value || undefined);
+  if (activeDirectory.value) {
+    void loadTreePath('.');
+    void refreshTreeStatus();
+  }
   const directory = activeDirectory.value || undefined;
   fetchPendingPermissions(directory);
   fetchPendingQuestions(directory);
@@ -6689,6 +7160,17 @@ onMounted(() => {
           }),
         };
       });
+      fileViewerQueue.value = fileViewerQueue.value.map((entry) => {
+        if (entry.isBinary) return entry;
+        const lang = entry.toolLang ?? guessLanguage(entry.path);
+        return {
+          ...entry,
+          html: buildEntryHtml(entry.content, lang, {
+            toolGutterMode: entry.toolGutterMode,
+            toolGutterLines: entry.toolGutterLines,
+          }),
+        };
+      });
     })
     .catch((err) => {
       log('shiki init failed', err);
@@ -6696,6 +7178,15 @@ onMounted(() => {
   window.addEventListener('pointermove', handlePointerMove);
   window.addEventListener('pointerup', handlePointerUp);
   window.addEventListener('resize', handleWindowResize);
+  unregisterTreeGlobalHook?.();
+  unregisterTreeGlobalHook = registerGlobalEventHook((payload, eventType) => {
+    if (!shouldRefreshTreeStatus(eventType)) return;
+    const directory = activeDirectory.value.trim();
+    if (!directory) return;
+    const eventDirectory = extractEventDirectory(payload);
+    if (eventDirectory && normalizeDirectory(eventDirectory) !== normalizeDirectory(directory)) return;
+    queueTreeStatusRefresh();
+  });
   connect();
 });
 onBeforeUnmount(() => {
@@ -6706,6 +7197,12 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(frame);
   });
   pendingToolScrollFrames.clear();
+  if (treeRefreshTimer !== null) {
+    window.clearTimeout(treeRefreshTimer);
+    treeRefreshTimer = null;
+  }
+  unregisterTreeGlobalHook?.();
+  unregisterTreeGlobalHook = null;
   src.value?.close();
   disposeShellWindows({ preserve: true });
 });

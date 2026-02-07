@@ -61,6 +61,32 @@ export function getPathInfo(baseUrl: string) {
   return getJson(baseUrl, '/path') as Promise<Record<string, string>>;
 }
 
+export function listFiles(
+  baseUrl: string,
+  payload: { directory: string; path?: string },
+) {
+  return getJson(baseUrl, '/file', {
+    directory: payload.directory,
+    path: payload.path,
+  }) as Promise<unknown>;
+}
+
+export function readFileContent(
+  baseUrl: string,
+  payload: { directory: string; path: string },
+) {
+  return getJson(baseUrl, '/file/content', {
+    directory: payload.directory,
+    path: payload.path,
+  }) as Promise<unknown>;
+}
+
+export function listFileStatus(baseUrl: string, payload: { directory: string }) {
+  return getJson(baseUrl, '/file/status', {
+    directory: payload.directory,
+  }) as Promise<unknown>;
+}
+
 export function listProjects(baseUrl: string, directory?: string) {
   return getJson(baseUrl, '/project', { directory }) as Promise<unknown>;
 }
