@@ -1,11 +1,10 @@
 <template>
   <div class="input-panel">
-    <div class="input-message">
+    <div class="input-message" :class="textareaToneClass">
       <textarea
         ref="textareaRef"
         v-model="messageValue"
-        class="input-control input-textarea"
-        :class="textareaToneClass"
+        class="input-textarea"
         placeholder="Send a message..."
         @keydown="handleKeydown"
         @keydown.enter.ctrl.prevent="$emit('send')"
@@ -465,6 +464,14 @@ const textareaToneClass = computed(() => {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow: visible;
+  background: #0b1320;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-sizing: border-box;
 }
 
 .input-toolbar {
@@ -518,23 +525,34 @@ const textareaToneClass = computed(() => {
 
 .input-textarea {
   resize: none;
-  min-height: 96px;
+  min-height: 1em;
   font-size: 13px;
   line-height: 1.2;
   display: block;
-  height: 100%;
-  min-height: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  height: auto;
+  position: relative;
+  z-index: 1;
+  border: none;
+  border-radius: inherit;
+  background: transparent;
+  color: #e2e8f0;
+  outline: none;
+  padding: 8px;
+  box-sizing: border-box;
+  font-family: inherit;
 }
 
-.input-textarea.tone-build {
+.input-message.tone-build {
   border-color: rgba(59, 130, 246, 0.65);
 }
 
-.input-textarea.tone-plan {
+.input-message.tone-plan {
   border-color: rgba(168, 85, 247, 0.72);
 }
 
-.input-textarea.tone-neutral {
+.input-message.tone-neutral {
   border-color: #334155;
 }
 
@@ -544,19 +562,30 @@ const textareaToneClass = computed(() => {
 
 .attachment-list {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: 6px;
-  margin-top: 8px;
+  width: 100%;
+  padding: 6px 8px 8px;
+  border-top: 1px solid #1e293b;
+  box-sizing: border-box;
+  max-height: 45%;
+  overflow: auto;
+  flex: 0 0 auto;
 }
 
 .attachment-item {
   display: flex;
   align-items: center;
+  flex: 0 1 250px;
+  max-width: 250px;
+  min-width: 0;
   gap: 8px;
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid #1e293b;
   background: rgba(2, 6, 23, 0.6);
+  box-sizing: border-box;
 }
 
 .attachment-thumb {
