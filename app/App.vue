@@ -33,14 +33,17 @@
               :is-status-error="isStatusError"
               :is-thinking="isThinking"
               :is-retry-status="!!retryStatus"
+              :busy-descendant-count="busyDescendantSessionIds.length"
               :theme="shikiTheme"
               :resolve-agent-color="resolveAgentColorForName"
+              :message-diffs="messageDiffsByKey"
               @scroll="handleOutputPanelScroll"
               @wheel="handleOutputPanelWheel"
               @touchmove="handleOutputPanelScroll"
               @resume-follow="resumeFollow"
               @fork-message="handleForkMessage"
               @revert-message="handleRevertMessage"
+              @show-message-diff="handleShowMessageDiff"
             />
             <SidePanel
               class="todo-panel"
@@ -118,6 +121,7 @@
         :thinking-options="thinkingOptions"
         :has-model-options="hasModelOptions"
         :has-thinking-options="hasThinkingOptions"
+        :can-attach="canAttach"
         :is-thinking="isThinking"
         :can-abort="canAbort"
         :commands="commandOptions"
@@ -147,7 +151,7 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue';
 import { bundledThemes } from 'shiki/bundle/web';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
@@ -164,7 +168,6 @@ import * as opencodeApi from './utils/opencode';
 import { opencodeTheme, resolveTheme, resolveAgentColor } from './utils/theme';
 
 const OPENCODE_BASE_URL = 'http://localhost:4096';
-const HISTORY_LIMIT = 60;
 const FOLLOW_THRESHOLD_PX = 24;
 const FLOATING_FOLLOW_THRESHOLD_PX = 2;
 const TOOL_PENDING_TTL_MS = 60_000;
@@ -266,6 +269,27 @@ type FileReadEntry = {
   diffCode?: string;
   diffAfter?: string;
   diffLang?: string;
+  diffTabs?: Array<{ file: string; before: string; after: string }>;
+  classification?: 'real_user' | 'system_injection' | 'unknown';
+  isFinalAnswer?: boolean;
+  isRound?: boolean;
+  roundId?: string;
+  roundMessages?: RoundMessage[];
+  roundDiffs?: MessageDiffEntry[];
+};
+
+type RoundMessage = {
+  messageId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  attachments?: MessageAttachment[];
+  agent?: string;
+  model?: string;
+  providerId?: string;
+  modelId?: string;
+  variant?: string;
+  time?: number;
+  usage?: MessageUsage;
 };
 
 type TodoItem = {
@@ -425,9 +449,12 @@ const {
   isFollowing,
   followThresholdPx: FOLLOW_THRESHOLD_PX,
 });
-const runningToolIds = new Set<string>();
+const runningToolIds = reactive(new Set<string>());
 const subagentSessionExpiry = new Map<string, number>();
 const messageSummaryTitleById = new Map<string, string>();
+type MessageDiffEntry = { file: string; diff: string; before?: string; after?: string };
+const messageDiffsByKey = reactive(new Map<string, Array<MessageDiffEntry>>());
+const userMessageToFinalKey = new Map<string, string>();
 const reasoningTitleBySessionId = new Map<string, string>();
 type SessionStatusType = 'busy' | 'idle' | 'retry';
 
@@ -469,7 +496,6 @@ const inputResizeState = ref<{
 } | null>(null);
 const inputHeight = ref<number | null>(null);
 let nextWindowZIndex = 20;
-const selectedSessionStatus = ref<'busy' | 'idle' | ''>('');
 let sessionStatusRequestId = 0;
 let primaryHistoryRequestId = 0;
 const messageIndexById = new Map<string, number>();
@@ -553,6 +579,9 @@ type ProviderModel = {
     input?: number;
     output?: number;
   };
+  capabilities?: {
+    attachment?: boolean;
+  };
 };
 
 type ProviderInfo = {
@@ -576,6 +605,7 @@ type AgentInfo = {
     providerID: string;
     modelID: string;
   };
+  variant?: string;
 };
 
 type CommandInfo = {
@@ -602,12 +632,14 @@ const modelOptions = ref<
   Array<{
     id: string;
     label: string;
+    displayName: string;
     providerID?: string;
     providerLabel?: string;
     variants?: Record<string, unknown>;
+    attachmentCapable?: boolean;
   }>
 >([]);
-const agentOptions = ref<Array<{ id: string; label: string }>>([]);
+const agentOptions = ref<Array<{ id: string; label: string; description?: string; color?: string }>>([]);
 const thinkingOptions = ref<Array<string | undefined>>([]);
 const providersLoaded = ref(false);
 const providersLoading = ref(false);
@@ -737,20 +769,44 @@ const canSend = computed(() =>
   ),
 );
 
-const isThinking = computed(() =>
-  Boolean(
-    selectedSessionStatus.value === 'busy' ||
+const busyDescendantSessionIds = computed(() => {
+  const allowed = allowedSessionIds.value;
+  const selected = selectedSessionId.value;
+  const tick = sessionStatusVersion.value;
+  if (tick < 0) return [] as string[];
+  const ids: string[] = [];
+  for (const sid of allowed) {
+    if (sid === selected) continue;
+    const status = getSessionStatus(sid);
+    if (status === 'busy' || status === 'retry') ids.push(sid);
+  }
+  return ids;
+});
+
+const isThinking = computed(() => {
+  const selected = selectedSessionId.value;
+  const tick = sessionStatusVersion.value;
+  void tick;
+  const ownStatus = selected ? getSessionStatus(selected) : undefined;
+  return Boolean(
+    ownStatus === 'busy' ||
+    ownStatus === 'retry' ||
+    busyDescendantSessionIds.value.length > 0 ||
     runningToolIds.size > 0 ||
     isSending.value ||
     isAborting.value,
-  ),
-);
+  );
+});
 const canAbort = computed(() =>
   Boolean(selectedSessionId.value && isThinking.value && !isAborting.value),
 );
 const hasAgentOptions = computed(() => agentOptions.value.length > 0);
 const hasModelOptions = computed(() => modelOptions.value.length > 0);
 const hasThinkingOptions = computed(() => thinkingOptions.value.length > 0);
+const canAttach = computed(() => {
+  const selected = modelOptions.value.find((m) => m.id === selectedModel.value);
+  return selected?.attachmentCapable !== false;
+});
 const commandOptions = computed(() => {
   const list = commands.value.slice();
   const hasShell = list.some((command) => command.name.toLowerCase() === 'shell');
@@ -1128,10 +1184,8 @@ function handleMessageInputUpdate(value: string) {
   persistComposerDraftForCurrentContext();
 }
 
-function handleSelectedModeUpdate(value: string) {
-  selectedMode.value = value;
-
-  const agent = agents.value.find((a) => a.name === value);
+function applyAgentDefaults(agentName: string) {
+  const agent = agents.value.find((a) => a.name === agentName);
   const defaultModel = agent?.model;
   if (defaultModel?.providerID && defaultModel?.modelID) {
     const match = modelOptions.value.find(
@@ -1139,9 +1193,21 @@ function handleSelectedModeUpdate(value: string) {
     );
     if (match) {
       selectedModel.value = match.id;
+      // Also apply recommended variant from agent if available
+      const nextThinkingOptions = buildThinkingOptions(match.variants);
+      thinkingOptions.value = nextThinkingOptions;
+      if (agent?.variant && nextThinkingOptions.includes(agent.variant)) {
+        selectedThinking.value = agent.variant;
+      } else {
+        selectedThinking.value = nextThinkingOptions[0];
+      }
     }
   }
+}
 
+function handleSelectedModeUpdate(value: string) {
+  selectedMode.value = value;
+  applyAgentDefaults(value);
   persistComposerDraftForCurrentContext();
 }
 
@@ -1274,13 +1340,47 @@ function getSessionStatus(sessionId: string, projectId?: string) {
   return undefined;
 }
 
+function getDescendantSessionIds(rootId: string): string[] {
+  const childrenByParent = new Map<string, string[]>();
+  sessionParentById.value.forEach((parentId, sessionId) => {
+    if (!parentId) return;
+    const bucket = childrenByParent.get(parentId) ?? [];
+    bucket.push(sessionId);
+    childrenByParent.set(parentId, bucket);
+  });
+  const result: string[] = [];
+  const stack = childrenByParent.get(rootId) ?? [];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    result.push(current);
+    const children = childrenByParent.get(current);
+    if (children) stack.push(...children);
+  }
+  return result;
+}
+
+function hasAnyBusyDescendant(rootId: string, projectId?: string): boolean {
+  const descendants = getDescendantSessionIds(rootId);
+  return descendants.some((sid) => {
+    const status = getSessionStatus(sid, projectId);
+    return status === 'busy' || status === 'retry';
+  });
+}
+
 const sessionStatusByIdRecord = computed<Record<string, SessionStatusType>>(() => {
   const tick = sessionStatusVersion.value;
   const next: Record<string, SessionStatusType> = {};
   if (tick < 0) return next;
   sessions.value.forEach((session) => {
-    const status = getSessionStatus(session.id, session.projectID);
-    if (status) next[session.id] = status;
+    if (session.parentID) return;
+    const ownStatus = getSessionStatus(session.id, session.projectID);
+    if (ownStatus === 'busy' || ownStatus === 'retry') {
+      next[session.id] = ownStatus;
+    } else if (hasAnyBusyDescendant(session.id, session.projectID)) {
+      next[session.id] = 'busy';
+    } else if (ownStatus) {
+      next[session.id] = ownStatus;
+    }
   });
   return next;
 });
@@ -1640,10 +1740,10 @@ function pickShikiTheme(names: string[]) {
 
 function getEntryTitle(entry: FileReadEntry) {
   const prefix = getEntryPrefix(entry);
-  const sourceModel = prefix === 'MESSAGE' ? entry.messageModel?.trim() : '';
+  const isFloatingMessage = entry.isReasoning || entry.isSubagentMessage;
   const withPrefix = (title: string) => {
     const resolvedTitle = title.trim() || 'message';
-    if (sourceModel) return `[${prefix} from ${sourceModel}] ${resolvedTitle}`;
+    if (isFloatingMessage) return `🤔 ${resolvedTitle}`;
     return `[${prefix}] ${resolvedTitle}`;
   };
   if (entry.isPermission) {
@@ -1686,6 +1786,7 @@ function getEntryPrefix(entry: FileReadEntry) {
   if (entry.isReasoning) return 'MESSAGE';
   if (entry.isSubagentMessage || entry.isMessage) return 'MESSAGE';
   if (entry.toolName === 'apply_patch') return 'PATCH';
+  if (entry.toolName === 'edit' || entry.toolName === 'multiedit') return 'EDIT';
   if (entry.toolName === 'write' || entry.isWrite) return 'WRITE';
   if (entry.toolName === 'read') return 'READ';
   if (entry.toolName === 'grep') return 'GREP';
@@ -2469,7 +2570,6 @@ async function bootstrapSelections() {
         await fetchWorktrees(selectedProjectDirectory.value);
         await refreshSessionsForDirectory(selectedWorktreeDir.value);
         if (targetSessionId) {
-          selectedSessionStatus.value = '';
           retryStatus.value = null;
           await fetchHistory(targetSessionId);
           await restoreShellSessions(targetSessionId);
@@ -2530,9 +2630,11 @@ async function fetchProviders() {
     const models: Array<{
       id: string;
       label: string;
+      displayName: string;
       providerID?: string;
       providerLabel?: string;
       variants?: Record<string, unknown>;
+      attachmentCapable?: boolean;
     }> = [];
     providers.value.forEach((provider) => {
       Object.values(provider.models ?? {}).forEach((model) => {
@@ -2543,9 +2645,11 @@ async function fetchProviders() {
         models.push({
           id: model.id,
           label,
+          displayName: modelDisplayName,
           providerID,
           providerLabel: providerLabel,
           variants: model.variants,
+          attachmentCapable: model.capabilities?.attachment !== false,
         });
       });
     });
@@ -2602,11 +2706,18 @@ async function fetchAgents() {
       .map((agent) => ({
         id: agent.name,
         label: agent.name ? `${agent.name.charAt(0).toUpperCase()}${agent.name.slice(1)}` : agent.name,
+        description: agent.description,
+        color: agent.color,
       }));
     agentOptions.value = options;
     if (!selectedMode.value || !options.some((option) => option.id === selectedMode.value)) {
       const preferred = options.find((option) => option.id === 'build')?.id ?? options[0]?.id;
-      if (preferred) selectedMode.value = preferred;
+      if (preferred) {
+        selectedMode.value = preferred;
+        // Apply recommended model+variant for the initially selected agent
+        // (only if no draft will override via restoreComposerDraftForContext)
+        applyAgentDefaults(preferred);
+      }
     }
   } catch (error) {
     log('Agent load failed', error);
@@ -2653,14 +2764,9 @@ async function fetchSessionStatus(directory?: string) {
     mergeSessionStatusesIfMissing(nextEntries, resolvedProjectId);
     if (selectedSessionId.value) {
       const nextStatus = getSessionStatus(selectedSessionId.value);
-      if (nextStatus === 'retry') {
-        selectedSessionStatus.value = 'busy';
-      } else {
+      if (nextStatus !== 'retry') {
         retryStatus.value = null;
-        selectedSessionStatus.value = nextStatus ?? '';
       }
-    } else {
-      selectedSessionStatus.value = '';
     }
   } catch (error) {
     log('Session status load failed', error);
@@ -3135,7 +3241,7 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
     const data = (await opencodeApi.listSessionMessages(
       OPENCODE_BASE_URL,
       sessionId,
-      directory || undefined,
+      { directory: directory || undefined },
     )) as Array<Record<string, unknown>>;
     if (!Array.isArray(data)) return;
     if (!isSubagentMessage) {
@@ -3156,6 +3262,20 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
     //     }
     //   }
     // }
+    data.forEach((message, index) => {
+      const info = message.info as Record<string, unknown> | undefined;
+      const parts = message.parts as unknown;
+      const id = typeof info?.id === 'string' ? info.id : undefined;
+      const role = typeof info?.role === 'string' ? info.role : undefined;
+      if (id && role === 'assistant' && Array.isArray(parts)) {
+        extractMessageDiffsFromParts(parts, id, sessionId);
+      }
+      // Validate parentID field exists in API response
+      if (index < 3) {
+        console.log(`Message ${index} parentID:`, info?.parentID);
+      }
+    });
+
     const history = data
       .map((message) => {
         const info = message.info as Record<string, unknown> | undefined;
@@ -3165,16 +3285,18 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         if (!text.trim() && attachments.length === 0) return null;
         const id = typeof info?.id === 'string' ? info.id : undefined;
         const role = typeof info?.role === 'string' ? info.role : undefined;
+        const finish = typeof info?.finish === 'string' ? info.finish : undefined;
         const meta = parseUserMessageMeta(info);
         const usage = resolveMessageUsageFromInfo(info);
         const messageTime = extractMessageTime(info);
         if (!id) return null;
-        return { id, role, text, attachments, meta, usage, messageTime };
+        return { id, role, finish, text, attachments, meta, usage, messageTime };
       })
       .filter(
         (entry): entry is {
           id: string;
           role?: string;
+          finish?: string;
           text: string;
           attachments: MessageAttachment[];
           meta: UserMessageMeta | null;
@@ -3183,9 +3305,11 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         } => Boolean(entry),
       );
 
-    history.slice(-HISTORY_LIMIT).forEach((entry) => {
-      const messageKey = buildMessageKey(entry.id, sessionId);
-      if (messageIndexById.has(messageKey)) return;
+    history.forEach((entry) => {
+      const isUserEntry = entry.role === 'user';
+      const isAssistantEntry = !isUserEntry;
+      const isSessionWindowEntry = isAssistantEntry && !isSubagentMessage;
+
       storeUserMessageMeta(entry.id, entry.meta);
       const resolvedMeta = resolveUserMessageMetaForMessage(entry.id, undefined, entry.meta);
       const displayMeta = resolveUserMessageDisplay(resolvedMeta);
@@ -3203,6 +3327,17 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
               computeContextPercent(entry.usage.tokens, usageProviderId, usageModelId),
           }
         : undefined;
+
+      if (isSessionWindowEntry && entry.finish !== 'stop') {
+        // For past intermediate messages (history), only store metadata — no OutputPanel entry.
+        // Only final answers (finish=stop) are shown in OutputPanel for history.
+        const messageKey = buildMessageKey(entry.id, sessionId);
+        if (historyUsage) messageUsageByKey.set(messageKey, historyUsage);
+        return;
+      }
+
+      const messageKey = buildMessageKey(entry.id, sessionId);
+      if (messageIndexById.has(messageKey)) return;
       if (historyUsage) messageUsageByKey.set(messageKey, historyUsage);
       const header = '';
       const time = Date.now();
@@ -3224,7 +3359,7 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         y: randomPosition.y,
         header,
         content: entry.text,
-        role: entry.role === 'user' ? 'user' : 'assistant',
+        role: isUserEntry ? 'user' : 'assistant',
         messageAgent: displayMeta?.agent,
         messageModel: displayMeta?.model,
         messageProviderId: usageProviderId,
@@ -3240,6 +3375,7 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         isWrite: false,
         isMessage: true,
         isSubagentMessage,
+        isFinalAnswer: isAssistantEntry && entry.finish === 'stop',
         messageId: entry.id,
         messageKey,
         follow: isSubagentMessage ? true : undefined,
@@ -3252,7 +3388,27 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
       messageIndexById.set(messageKey, queue.value.length - 1);
       messageContentById.set(messageKey, entry.text);
     });
-    if (!isSubagentMessage) scheduleFollowScroll();
+
+    // Attach summary.diffs from user messages to their corresponding final answer entries
+    if (!isSubagentMessage) {
+      const allMessages = data as Array<Record<string, unknown>>;
+      let lastUserSummaryDiffs: Array<MessageDiffEntry> | undefined;
+      for (const message of allMessages) {
+        const info = message.info as Record<string, unknown> | undefined;
+        const id = typeof info?.id === 'string' ? info.id : undefined;
+        const role = typeof info?.role === 'string' ? info.role : undefined;
+        const finish = typeof info?.finish === 'string' ? info.finish : undefined;
+        if (!id) continue;
+        if (role === 'user') {
+          lastUserSummaryDiffs = extractSummaryDiffs(info);
+        } else if (role === 'assistant' && finish === 'stop' && lastUserSummaryDiffs && lastUserSummaryDiffs.length > 0) {
+          const finalKey = buildMessageKey(id, sessionId);
+          messageDiffsByKey.set(finalKey, lastUserSummaryDiffs);
+          lastUserSummaryDiffs = undefined;
+        }
+      }
+      scheduleFollowScroll();
+    }
   } catch (error) {
     log('History load failed', error);
   }
@@ -3499,12 +3655,51 @@ type DebugToolEvent = {
 
 function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
   const basePath = getSelectedWorktreeDirectory() || '/tmp/debug';
-  const sampleFile = `${basePath.replace(/\/+$/, '')}/src/sample.ts`;
-  const sampleAltFile = `${basePath.replace(/\/+$/, '')}/README.md`;
-  const debugReadBody = Array.from({ length: 240 }, (_, index) => {
-    const line = index + 1;
-    return `${line}|const item_${line} = { id: ${line}, label: 'debug-line-${line}', status: ${line % 2 === 0 ? "'ok'" : "'pending'"} };`;
-  }).join('\n');
+  const sampleFile = `${basePath.replace(/\/+$/, '')}/src/components/App.vue`;
+  const sampleAltFile = `${basePath.replace(/\/+$/, '')}/tsconfig.json`;
+  const debugReadLines = [
+    '<template>',
+    '  <div class="container">',
+    '    <header class="header">',
+    '      <h1>{{ title }}</h1>',
+    '      <nav class="nav">',
+    '        <button v-for="item in items" :key="item.id" @click="select(item)">',
+    '          {{ item.label }}',
+    '        </button>',
+    '      </nav>',
+    '    </header>',
+    '    <main class="content">',
+    '      <slot />',
+    '    </main>',
+    '  </div>',
+    '</template>',
+    '',
+    '<script setup lang="ts">',
+    "import { ref, computed } from 'vue';",
+    '',
+    'type NavItem = { id: string; label: string; active?: boolean };',
+    '',
+    'const props = defineProps<{',
+    '  title: string;',
+    '  items: NavItem[];',
+    '}>();',
+    '',
+    'const emit = defineEmits<{',
+    "  (event: 'select', item: NavItem): void;",
+    '}>();',
+    '',
+    "const selected = ref<string>('');",
+    'const activeItem = computed(() => props.items.find((item) => item.id === selected.value));',
+    '',
+    'function select(item: NavItem) {',
+    '  selected.value = item.id;',
+    "  emit('select', item);",
+    '}',
+    '<\/script>',
+  ];
+  const debugReadBody = debugReadLines
+    .map((line, index) => `${String(index + 1).padStart(5, '0')}| ${line}`)
+    .join('\n');
   const debugReadOutput = `<file>\n${debugReadBody}\n</file>`;
   switch (tool) {
     case 'apply_patch':
@@ -3513,29 +3708,26 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
           status: 'running',
           input: {
             patchText:
-              '*** Begin Patch\n*** Update File: src/sample.ts\n@@\n-console.log("old")\n+console.log("new")\n*** Update File: README.md\n@@\n-Old line\n+New line\n*** End Patch',
+              '*** Begin Patch\n*** Update File: app/components/ToolWindow.vue\n@@\n-  padding: 0 8px;\n+  padding: 0 4px;\n*** End Patch',
           },
+          output: 'Applying patch...',
         },
         {
           status: 'completed',
           delayMs: 550,
           input: {
             patchText:
-              '*** Begin Patch\n*** Update File: src/sample.ts\n@@\n-console.log("old")\n+console.log("new")\n*** Update File: README.md\n@@\n-Old line\n+New line\n*** End Patch',
+              '*** Begin Patch\n*** Update File: app/components/ToolWindow.vue\n@@\n-  padding: 0 8px;\n+  padding: 0 4px;\n*** End Patch',
           },
           metadata: {
             files: [
               {
-                relativePath: 'src/sample.ts',
-                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-console.log("old")\n+console.log("new")',
-              },
-              {
-                relativePath: 'README.md',
-                diff: 'diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1,1 +1,1 @@\n-Old line\n+New line',
+                relativePath: 'app/components/ToolWindow.vue',
+                diff: 'diff --git a/app/components/ToolWindow.vue b/app/components/ToolWindow.vue\n--- a/app/components/ToolWindow.vue\n+++ b/app/components/ToolWindow.vue\n@@ -410,1 +410,1 @@\n-  padding: 0 8px;\n+  padding: 0 4px;',
               },
             ],
           },
-          output: 'Patch applied',
+          output: 'Success. Updated the following files:\nM app/components/ToolWindow.vue',
         },
       ];
     case 'bash':
@@ -3543,21 +3735,22 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
         {
           status: 'running',
           input: {
-            command:
-              "python - <<'PY'\nprint('build start')\nfor i in range(3):\n    print('step', i + 1)\nPY",
-            description: 'Run debug script',
+            command: 'git diff --stat',
+            workdir: basePath,
+            description: 'Show unstaged and staged differences',
           },
-          output: 'build start\nstep 1\nstep 2',
+          output: ' app/App.vue | 24 ++++++++++++++----------',
         },
         {
           status: 'completed',
           delayMs: 500,
           input: {
-            command:
-              "python - <<'PY'\nprint('build start')\nfor i in range(3):\n    print('step', i + 1)\nPY",
-            description: 'Run debug script',
+            command: 'git diff --stat',
+            workdir: basePath,
+            description: 'Show unstaged and staged differences',
           },
-          output: 'build start\nstep 1\nstep 2\nstep 3\ncompleted',
+          output:
+            ' app/App.vue                         | 24 ++++++++++++++----------\n app/components/ToolWindow.vue         | 10 ++++++----\n app/components/MessageViewer.vue      |  4 ++--\n 3 files changed, 24 insertions(+), 14 deletions(-)',
         },
       ];
     case 'batch':
@@ -3576,50 +3769,51 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       ];
     case 'codesearch':
       return [
-        { status: 'running', input: { query: 'react usememo patterns' }, output: 'Searching web index...' },
+        { status: 'running', input: { query: 'defineProps generic vue' }, output: 'Searching GitHub code...' },
         {
           status: 'completed',
           delayMs: 420,
-          input: { query: 'react usememo patterns' },
-          output: '## Results\n- useMemo helps cache expensive calculations\n- Keep dependencies minimal',
+          input: { query: 'defineProps generic vue' },
+          output:
+            '## Results\n- vuejs/core: `const props = defineProps<Props>()`\n- nuxt/ui: `defineProps<{ items: T[]; modelValue?: T }>()`\n- vitepress: generic props with `withDefaults(defineProps<...>(), {...})`',
         },
       ];
     case 'edit':
       return [
         {
           status: 'running',
-          input: { filePath: sampleFile, oldString: 'old', newString: 'new' },
+          input: { filePath: sampleFile, oldString: 'const selected = ref<string>(\'\');', newString: 'const activeId = ref<string>(\'\');' },
           output: 'Editing file...',
         },
         {
           status: 'completed',
           delayMs: 420,
-          input: { filePath: sampleFile, oldString: 'old', newString: 'new' },
+          input: { filePath: sampleFile, oldString: 'const selected = ref<string>(\'\');', newString: 'const activeId = ref<string>(\'\');' },
           metadata: {
-            diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-const value = "old"\n+const value = "new"',
+            diff: 'diff --git a/src/components/App.vue b/src/components/App.vue\n--- a/src/components/App.vue\n+++ b/src/components/App.vue\n@@ -31,1 +31,1 @@\n-const selected = ref<string>(\'\');\n+const activeId = ref<string>(\'\');',
           },
           output: 'Applied edit',
         },
       ];
     case 'glob':
       return [
-        { status: 'running', input: { pattern: 'src/**/*.ts', path: basePath }, output: 'Searching...' },
+        { status: 'running', input: { pattern: 'app/components/**/*.vue', path: basePath }, output: 'Searching...' },
         {
           status: 'completed',
           delayMs: 360,
-          input: { pattern: 'src/**/*.ts', path: basePath },
-          output: `${sampleFile}\n${basePath}/src/debug/util.ts`,
+          input: { pattern: 'app/components/**/*.vue', path: basePath },
+          output: `${basePath}/app/components/ToolWindow.vue\n${basePath}/app/components/MessageViewer.vue\n${basePath}/app/components/FileViewerWindow.vue`,
         },
       ];
     case 'grep':
       return [
-        { status: 'running', input: { pattern: 'console\\.log', path: basePath }, output: 'Scanning files...' },
+        { status: 'running', input: { pattern: 'defineProps|defineEmits', path: `${basePath}/app/components`, include: '*.vue' }, output: 'Scanning files...' },
         {
           status: 'completed',
           delayMs: 380,
-          input: { pattern: 'console\\.log', path: basePath },
+          input: { pattern: 'defineProps|defineEmits', path: `${basePath}/app/components`, include: '*.vue' },
           output:
-            `Found 2 matches\n${sampleFile}:\n  Line 111: console.log("debug")\n  Line 128: console.log(result)\nsummary line without marker`,
+            `Found 6 matches\n${basePath}/app/components/ToolWindow.vue:\n  Line 117: const props = defineProps<{\n${basePath}/app/components/MessageViewer.vue:\n  Line 20: const props = defineProps<{\n  Line 31: const emit = defineEmits<{\n${basePath}/app/components/FileViewerWindow.vue:\n  Line 53: const props = defineProps<{\n${basePath}/app/components/PermissionWindow.vue:\n  Line 109: const props = defineProps<{\n${basePath}/app/components/QuestionWindow.vue:\n  Line 112: const props = defineProps<{`,
         },
       ];
     case 'list':
@@ -3629,27 +3823,39 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
           status: 'completed',
           delayMs: 360,
           input: { path: basePath },
-          output: '.\n├── src\n│   └── sample.ts\n└── README.md',
+          output: '.\n├── app\n│   ├── App.vue\n│   └── components\n│       ├── ToolWindow.vue\n│       └── MessageViewer.vue\n├── logs\n│   └── tool.log\n└── package.json',
         },
       ];
     case 'multiedit':
       return [
         {
           status: 'running',
-          input: { filePath: sampleFile, edits: [{ oldString: 'old', newString: 'new' }] },
+          input: {
+            filePath: sampleFile,
+            edits: [
+              { oldString: 'const selected = ref<string>(\'\');', newString: 'const activeId = ref<string>(\'\');' },
+              { oldString: 'selected.value = item.id;', newString: 'activeId.value = item.id;' },
+            ],
+          },
           output: 'Applying 2 edits...',
         },
         {
           status: 'completed',
           delayMs: 430,
-          input: { filePath: sampleFile, edits: [{ oldString: 'old', newString: 'new' }] },
+          input: {
+            filePath: sampleFile,
+            edits: [
+              { oldString: 'const selected = ref<string>(\'\');', newString: 'const activeId = ref<string>(\'\');' },
+              { oldString: 'selected.value = item.id;', newString: 'activeId.value = item.id;' },
+            ],
+          },
           metadata: {
             results: [
               {
-                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -1,1 +1,1 @@\n-const first = old\n+const first = new',
+                diff: 'diff --git a/src/components/App.vue b/src/components/App.vue\n--- a/src/components/App.vue\n+++ b/src/components/App.vue\n@@ -31,1 +31,1 @@\n-const selected = ref<string>(\'\');\n+const activeId = ref<string>(\'\');',
               },
               {
-                diff: 'diff --git a/src/sample.ts b/src/sample.ts\n--- a/src/sample.ts\n+++ b/src/sample.ts\n@@ -3,1 +3,1 @@\n-const second = old\n+const second = new',
+                diff: 'diff --git a/src/components/App.vue b/src/components/App.vue\n--- a/src/components/App.vue\n+++ b/src/components/App.vue\n@@ -35,1 +35,1 @@\n-selected.value = item.id;\n+activeId.value = item.id;',
               },
             ],
           },
@@ -3674,56 +3880,75 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       ];
     case 'read':
       return [
-        { status: 'running', input: { filePath: sampleFile }, output: '<file>\n</file>' },
+        {
+          status: 'running',
+          input: { filePath: sampleFile, offset: 0, limit: 80 },
+          output: '<file>\n00001| <template>\n00002|   <div class="container">\n00003|     <header class="header">\n...</file>',
+        },
         {
           status: 'completed',
           delayMs: 380,
-          input: { filePath: sampleFile },
+          input: { filePath: sampleFile, offset: 0, limit: 80 },
           output: debugReadOutput,
         },
       ];
     case 'task':
       return [
-        { status: 'running', input: { description: 'Analyze routes' }, output: 'task_id: task_debug_1' },
+        { status: 'running', input: { description: 'Analyze component dependencies' }, output: 'task_id: task_debug_1' },
         {
           status: 'completed',
           delayMs: 420,
-          input: { description: 'Analyze routes' },
-          output: 'task_id: task_debug_1\n<task_result>\nFound 3 route handlers and 1 auth guard.\n</task_result>',
+          input: { description: 'Analyze component dependencies' },
+          output:
+            'task_id: task_debug_1\n<task_result>\nScanned 9 Vue components.\nIdentified 3 shared render paths and 2 high-churn style hotspots.\nRecommended extracting a common window-surface token set.\n</task_result>',
         },
       ];
     case 'webfetch':
       return [
-        { status: 'running', input: { url: 'https://example.com', format: 'markdown' }, output: 'Fetching...' },
+        {
+          status: 'running',
+          input: { url: 'https://opencode.ai/docs/server/', format: 'markdown', timeout: 30 },
+          output: 'Fetching...',
+        },
         {
           status: 'completed',
           delayMs: 420,
-          input: { url: 'https://example.com', format: 'markdown' },
-          output: '# Example Domain\n\nThis domain is for illustrative examples in documents.',
+          input: { url: 'https://opencode.ai/docs/server/', format: 'markdown', timeout: 30 },
+          output:
+            '# Server\n\nThe OpenCode server exposes session APIs, streaming events, and tool endpoints.\n\n## Endpoints\n- `GET /session`\n- `POST /session/:id/message`\n- `GET /experimental/tool`',
         },
       ];
     case 'websearch':
       return [
-        { status: 'running', input: { query: 'vite vue performance tips' }, output: 'Searching...' },
+        { status: 'running', input: { query: 'vue 3 composable best practices' }, output: 'Searching...' },
         {
           status: 'completed',
           delayMs: 430,
-          input: { query: 'vite vue performance tips' },
-          output: '## Search Results\n- Use dynamic import for large routes\n- Enable build cache in CI',
+          input: { query: 'vue 3 composable best practices' },
+          output:
+            '## Search Results\n- Keep composables focused on one concern\n- Return plain refs and methods, avoid over-abstracting\n- Accept explicit parameters instead of reading globals when possible',
         },
       ];
     case 'write':
       return [
         {
           status: 'running',
-          input: { filePath: sampleAltFile, content: 'hello\n' },
+          input: {
+            filePath: sampleAltFile,
+            content:
+              '{\n  "compilerOptions": {\n    "target": "ES2022",\n    "module": "ESNext",\n    "moduleResolution": "Bundler",\n    "strict": true\n  },\n  "include": ["app/**/*.ts", "app/**/*.vue"]\n}\n',
+          },
           output: 'Writing file...',
         },
         {
           status: 'completed',
           delayMs: 360,
-          input: { filePath: sampleAltFile, content: 'hello\n' },
-          output: 'Wrote README.md',
+          input: {
+            filePath: sampleAltFile,
+            content:
+              '{\n  "compilerOptions": {\n    "target": "ES2022",\n    "module": "ESNext",\n    "moduleResolution": "Bundler",\n    "strict": true\n  },\n  "include": ["app/**/*.ts", "app/**/*.vue"]\n}\n',
+          },
+          output: 'Wrote tsconfig.json',
         },
       ];
     default:
@@ -3731,7 +3956,9 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
   }
 }
 
-function dispatchSyntheticToolPart(part: Record<string, unknown>) {
+function injectSyntheticEvent(part: Record<string, unknown>) {
+  const eventSource = src.value;
+  if (!eventSource) return;
   const payload = {
     type: 'messagePartUpdated',
     payload: {
@@ -3740,13 +3967,10 @@ function dispatchSyntheticToolPart(part: Record<string, unknown>) {
       },
     },
   };
-  const patchEvents = extractPatch(payload);
-  if (patchEvents) {
-    patchEvents.forEach((entry) => upsertToolEntry(entry, 'message', 'diff'));
-    return;
-  }
-  const fileRead = extractFileRead(payload, 'message');
-  if (fileRead) upsertToolEntry(fileRead, 'message');
+  const event = new MessageEvent('message', {
+    data: JSON.stringify(payload),
+  });
+  eventSource.dispatchEvent(event);
 }
 
 function runDebugTool(tool: string) {
@@ -3771,7 +3995,7 @@ function runDebugTool(tool: string) {
       offset += delay;
       const sessionId = selectedSessionId.value || 'ses_debug';
       window.setTimeout(() => {
-        dispatchSyntheticToolPart({
+        injectSyntheticEvent({
           type: 'tool',
           tool: toolName,
           callID: baseCallId,
@@ -3901,7 +4125,14 @@ async function abortSession() {
   sendStatus.value = 'Stopping...';
   try {
     const directory = activeDirectory.value.trim();
-    await opencodeApi.abortSession(OPENCODE_BASE_URL, sessionId, directory || undefined);
+    const busyDescendants = busyDescendantSessionIds.value;
+    const abortPromises = [
+      opencodeApi.abortSession(OPENCODE_BASE_URL, sessionId, directory || undefined),
+      ...busyDescendants.map((sid) =>
+        opencodeApi.abortSession(OPENCODE_BASE_URL, sid, directory || undefined).catch(() => {}),
+      ),
+    ];
+    await Promise.all(abortPromises);
     sendStatus.value = 'Stopped.';
   } catch (error) {
     sendStatus.value = `Stop failed: ${toErrorMessage(error)}`;
@@ -3994,21 +4225,13 @@ function reloadSelectedSessionState() {
   messagePartsById.clear();
   messagePartOrderById.clear();
   messageSummaryTitleById.clear();
+  messageDiffsByKey.clear();
   messageAttachmentsById.clear();
   reasoningTitleBySessionId.clear();
   activeReasoningMessageIdByKey.clear();
   finishedReasoningByKey.clear();
   subagentSessionExpiry.clear();
-  selectedSessionStatus.value = '';
   retryStatus.value = null;
-  if (selectedSessionId.value) {
-    const storedStatus = getSessionStatus(selectedSessionId.value);
-    if (storedStatus === 'retry') {
-      selectedSessionStatus.value = 'busy';
-    } else if (storedStatus) {
-      selectedSessionStatus.value = storedStatus;
-    }
-  }
   todosBySessionId.value = {};
   todoLoadingBySessionId.value = {};
   todoErrorBySessionId.value = {};
@@ -4133,8 +4356,8 @@ setInterval(() => {
   messageIndexById.clear();
   toolIndexByCallId.clear();
   messageContentById.clear();
-  messagePartsById.clear();
-  messagePartOrderById.clear();
+  const survivingParts = new Map<string, Map<string, string>>();
+  const survivingPartOrder = new Map<string, string[]>();
   runningToolIds.clear();
   queue.value = queue.value.filter((entry) => {
     if (entry.isMessage) {
@@ -4153,9 +4376,17 @@ setInterval(() => {
     if (entry.isMessage && entry.messageId) {
       const messageKey = buildMessageKey(entry.messageId, entry.sessionId);
       messageContentById.set(messageKey, entry.content);
+      const existingParts = messagePartsById.get(messageKey);
+      const existingOrder = messagePartOrderById.get(messageKey);
+      if (existingParts) survivingParts.set(messageKey, existingParts);
+      if (existingOrder) survivingPartOrder.set(messageKey, existingOrder);
     }
     if (entry.callId && entry.toolStatus === 'running') runningToolIds.add(entry.callId);
   });
+  messagePartsById.clear();
+  messagePartOrderById.clear();
+  survivingParts.forEach((parts, key) => messagePartsById.set(key, parts));
+  survivingPartOrder.forEach((order, key) => messagePartOrderById.set(key, order));
 }, 100);
 
 watch(
@@ -5039,6 +5270,69 @@ function openSessionDiff(path: string) {
   fileViewerQueue.value.push(diffEntry);
 }
 
+function handleShowMessageDiff(payload: { messageKey: string; diffs: Array<MessageDiffEntry> }) {
+  const { messageKey, diffs } = payload;
+  if (!diffs || diffs.length === 0) return;
+  const toolKey = `message-diff:${messageKey}`;
+  const existing = fileViewerQueue.value.find((item) => item.toolKey === toolKey);
+  if (existing) {
+    bringToFront(existing);
+    return;
+  }
+  // If diffs have before/after (from summary.diffs), use them for rich diff view
+  const hasBeforeAfter = diffs.some((d) => typeof d.before === 'string' && typeof d.after === 'string');
+  const combinedDiff = hasBeforeAfter ? '' : diffs.map((d) => d.diff).join('\n');
+  const metrics = getCanvasMetrics();
+  const x = metrics ? clamp(metrics.canvasRect.width * 0.16, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 24;
+  const y = metrics ? clamp(metrics.toolAreaHeight * 0.1, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 24;
+  const fileCount = diffs.length;
+  const title = fileCount === 1 ? diffs[0].file : `${fileCount} files changed`;
+  const firstFile = diffs[0]?.file ?? '';
+  
+  let diffTabs: Array<{ file: string; before: string; after: string }> | undefined;
+  if (hasBeforeAfter && fileCount > 1) {
+    diffTabs = diffs
+      .filter((d) => typeof d.before === 'string' && typeof d.after === 'string')
+      .map((d) => ({
+        file: d.file,
+        before: d.before!,
+        after: d.after!,
+      }));
+  }
+
+  const diffEntry: FileReadEntry = {
+    time: Date.now(),
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    x,
+    y,
+    header: '',
+    path: firstFile,
+    content: hasBeforeAfter ? '' : combinedDiff,
+    scroll: false,
+    scrollDistance: 0,
+    scrollDuration: 0,
+    html: '',
+    isWrite: false,
+    isMessage: false,
+    toolName: 'diff',
+    toolTitle: title,
+    toolLang: 'diff',
+    toolGutterMode: hasBeforeAfter ? 'double' : 'none',
+    toolKey,
+    width: FILE_VIEWER_WINDOW_WIDTH,
+    height: FILE_VIEWER_WINDOW_HEIGHT,
+    isBinary: false,
+    isDiff: true,
+    isLoading: true,
+    diffCode: hasBeforeAfter ? (diffs[0]?.before ?? '') : '',
+    diffAfter: hasBeforeAfter ? (diffs[0]?.after ?? '') : undefined,
+    diffLang: fileCount === 1 ? guessLanguage(firstFile) : 'text',
+    diffTabs,
+  };
+  bringToFront(diffEntry);
+  fileViewerQueue.value.push(diffEntry);
+}
+
 async function openFileViewer(path: string) {
   const existing = getFileViewerByPath(path);
   if (existing) {
@@ -5677,6 +5971,7 @@ function extractFileRead(payload: unknown, eventType: string) {
         break;
       }
       case 'multiedit': {
+        if (status === 'running') return null;
         path = typeof input?.filePath === 'string' ? input.filePath : undefined;
         toolTitle = formatReadLikeToolTitle(input);
         const results = Array.isArray(metadata?.results) ? metadata.results : [];
@@ -5687,8 +5982,25 @@ function extractFileRead(payload: unknown, eventType: string) {
             return typeof diff === 'string' && diff.trim() ? diff : null;
           })
           .filter((item): item is string => Boolean(item));
-        if (diffs.length > 0) {
-          content = diffs.join('\n\n');
+        if (diffs.length > 1) {
+          const baseTitle = toolTitle?.trim() ? toolTitle.trim() : undefined;
+          return diffs.map((diff, index) => ({
+            content: diff,
+            path,
+            isWrite: true,
+            callId: callId ? `${callId}:${index}` : undefined,
+            toolStatus: status,
+            toolName: tool,
+            toolTitle: baseTitle ? `${baseTitle} (${index + 1}/${diffs.length})` : undefined,
+            lang: 'diff',
+            grepPattern: undefined,
+            wrapMode: undefined as FileReadEntry['toolWrapMode'],
+            gutterMode: undefined as FileReadEntry['toolGutterMode'],
+            gutterLines: undefined as string[] | undefined,
+          }));
+        }
+        if (diffs.length === 1) {
+          content = diffs[0];
           lang = 'diff';
         } else {
           lang = 'text';
@@ -5884,6 +6196,125 @@ function extractMessageAttachments(payload: unknown) {
   return { messageId, attachments };
 }
 
+function hasToolParts(
+  parts?: Map<string, string>,
+  partOrder?: string[],
+  messageId?: string,
+  sessionId?: string,
+): boolean {
+  if (!parts || !partOrder || parts.size === 0) return false;
+  // If we can't inspect part types directly from the map (which only has content),
+  // we might need to rely on the side-effect based diff collection or previous knowledge.
+  // However, the `queue` tool entries are created separately.
+  // Wait, `messagePartsById` maps partId -> content string. It doesn't store type.
+  // But `extractMessage` sees the `partType` in the event.
+  // We need a way to know if a message has tool parts.
+  // Let's check `queue` for tool entries associated with this message?
+  // Tool entries in queue have `callId`.
+  // Assistant messages in queue don't "contain" the tools, they are separate entries.
+  // But the prompt says "assistant side: classification signal for final_summary vs intermediate".
+  // "use part composition (e.g. presence/absence of tool and text)".
+  // If `extractMessage` receives a part with type `tool`, we know.
+  // But we need to know the *composition* of the whole message.
+  // A message might consist of multiple parts.
+  // If ANY part is a tool, it's intermediate?
+  // Let's track part types in a new map.
+  return false; // placeholder, will implement with new map
+}
+
+const messagePartTypesById = new Map<string, Set<string>>();
+
+function registerPartType(messageKey: string, partType?: string) {
+  if (!partType || !messageKey) return;
+  const set = messagePartTypesById.get(messageKey) ?? new Set();
+  set.add(partType);
+  messagePartTypesById.set(messageKey, set);
+}
+
+function classifyUserMessage(
+  role: string | undefined,
+  content: string,
+  userMeta: UserMessageMeta | null,
+): 'real_user' | 'system_injection' | 'unknown' {
+  if (role !== 'user') return 'unknown';
+  
+  // 1. If we have explicit user metadata (agent/model config), it's likely a real user request
+  // (or a very sophisticated injection simulating a user config, but we treat that as user-initiated).
+  if (userMeta) return 'real_user';
+
+  // 2. If the content matches something recently typed by the user in this session.
+  const normalized = content.trim();
+  const recentMatch = recentUserInputs.find((entry) => entry.text === normalized);
+  if (recentMatch) return 'real_user';
+
+  // 3. Fallback: If we can't confirm it's a real user, and it has no meta, 
+  // we classify as unknown (or system_injection if we had a negative signal).
+  // The prompt says "If real-user vs injected cannot be determined, classify as unknown".
+  return 'unknown';
+}
+
+function classifyAssistantMessage(
+  role: string | undefined,
+  messageKey: string,
+): { isFinalAnswer: boolean } {
+  if (role !== 'assistant') return { isFinalAnswer: false };
+
+  const types = messagePartTypesById.get(messageKey);
+  if (!types || types.size === 0) {
+    // No parts recorded yet? It might be a simple message without parts.
+    // If it has content, it's likely text.
+    return { isFinalAnswer: true }; 
+  }
+
+  // If it contains ANY tool use, it's intermediate.
+  // (We assume 'tool' or 'tool_use' or similar part types).
+  // I need to verify what the part type string is for tools.
+  // `upsertToolEntry` logic suggests `eventType` might be 'patch' etc, but `extractMessage` checks `part.type`.
+  // `extractMessageDiffsFromParts` checks `p.type === 'tool'`.
+  const hasTool = types.has('tool');
+  
+  // If it has tool, it's intermediate (not final summary).
+  if (hasTool) return { isFinalAnswer: false };
+
+  // If it has only text (and maybe reasoning?), it's a summary.
+  return { isFinalAnswer: true };
+}
+
+function extractPartType(payload: unknown, eventType: string) {
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const nestedPayload =
+    record.payload && typeof record.payload === 'object'
+      ? (record.payload as Record<string, unknown>)
+      : undefined;
+  const properties =
+    (nestedPayload?.properties && typeof nestedPayload.properties === 'object'
+      ? (nestedPayload.properties as Record<string, unknown>)
+      : undefined) ??
+    (record.properties && typeof record.properties === 'object'
+      ? (record.properties as Record<string, unknown>)
+      : undefined);
+  const part =
+    properties?.part && typeof properties.part === 'object'
+      ? (properties.part as Record<string, unknown>)
+      : undefined;
+  const partType = typeof part?.type === 'string' ? part.type : undefined;
+  
+  if (!partType) return null;
+
+  const messageId =
+    (part?.messageID as string | undefined) ??
+    (properties?.messageId as string | undefined);
+  
+  const sessionId =
+    (typeof part?.sessionID === 'string' ? (part.sessionID as string) : undefined) ??
+    extractSessionId(payload);
+
+  if (!messageId) return null;
+
+  return { partType, messageId, sessionId };
+}
+
 function extractMessage(payload: unknown, eventType: string) {
   if (!payload) return null;
 
@@ -6075,7 +6506,103 @@ function extractMessageFinish(payload: unknown, eventType: string) {
       : typeof (info?.messageId as string | undefined) === 'string'
         ? (info.messageId as string)
         : undefined;
-  return { finish, sessionId, messageId };
+  const parentID =
+    typeof info?.parentID === 'string' ? (info.parentID as string) : undefined;
+  return { finish, sessionId, messageId, parentID };
+}
+
+function extractSummaryDiffs(info: Record<string, unknown> | undefined): Array<MessageDiffEntry> {
+  const summary = info?.summary && typeof info.summary === 'object'
+    ? (info.summary as Record<string, unknown>)
+    : undefined;
+  const diffs = Array.isArray(summary?.diffs) ? summary.diffs : [];
+  const result: Array<MessageDiffEntry> = [];
+  for (const d of diffs) {
+    if (!d || typeof d !== 'object') continue;
+    const rec = d as Record<string, unknown>;
+    const file = typeof rec.file === 'string' ? rec.file : '';
+    const before = typeof rec.before === 'string' ? rec.before : undefined;
+    const after = typeof rec.after === 'string' ? rec.after : undefined;
+    if (!file) continue;
+    result.push({ file, diff: '', before, after });
+  }
+  return result;
+}
+
+function promoteFinalAnswerToOutputPanel(
+  messageFinish: { finish: string; sessionId?: string; messageId?: string; parentID?: string },
+  fallbackSessionId?: string,
+) {
+  const resolvedSessionId = messageFinish.sessionId ?? fallbackSessionId;
+  if (!resolvedSessionId) return;
+  // Only promote for the primary (selected) session — subagent sessions use floating windows
+  if (resolvedSessionId !== selectedSessionId.value) return;
+  const sessionWindowId = `session:${resolvedSessionId}`;
+  const sessionWindowKey = buildMessageKey(sessionWindowId, resolvedSessionId);
+  const content = messageContentById.get(sessionWindowKey);
+  if (!content || !content.trim()) return;
+
+  // Build a stable key for this final answer using the actual message ID
+  const finalMessageId = messageFinish.messageId ?? sessionWindowId;
+  const finalMessageKey = buildMessageKey(finalMessageId, resolvedSessionId);
+  // Avoid duplicates — if this final answer is already in the OutputPanel, skip
+  if (messageIndexById.has(finalMessageKey)) return;
+
+  const existingUsage = messageUsageByKey.get(sessionWindowKey) ?? messageUsageByKey.get(finalMessageKey);
+  const time = Date.now();
+  const header = '';
+  const text = `${header}${content}`;
+  const messageColumns = 52;
+  const visibleLines = 12;
+  const lines = countWrappedLines(text, messageColumns);
+  const overflowLines = Math.max(0, lines - visibleLines);
+  const lineHeight = 16;
+  const scrollDistance = Math.max(0, overflowLines * lineHeight);
+  const scrollDuration =
+    overflowLines > 0 ? Math.min(0.25, Math.max(0.08, overflowLines * 0.01)) : 0;
+  const attachments = messageAttachmentsById.get(sessionWindowKey) ?? messageAttachmentsById.get(finalMessageKey);
+
+  // Inherit agent/model display from the session window entry if it exists
+  const sessionWindowIndex = messageIndexById.get(sessionWindowKey);
+  const sessionWindowEntry = sessionWindowIndex !== undefined ? queue.value[sessionWindowIndex] : undefined;
+
+  queue.value.push({
+    time,
+    expiresAt: time + 1000 * 60 * 30,
+    x: 0,
+    y: 0,
+    header,
+    content,
+    role: 'assistant',
+    messageAgent: sessionWindowEntry?.messageAgent,
+    messageModel: sessionWindowEntry?.messageModel,
+    messageProviderId: sessionWindowEntry?.messageProviderId,
+    messageModelId: sessionWindowEntry?.messageModelId,
+    messageUsage: existingUsage,
+    messageVariant: sessionWindowEntry?.messageVariant,
+    messageTime: undefined,
+    scroll: overflowLines > 0,
+    scrollDistance,
+    scrollDuration,
+    html: '',
+    attachments,
+    isWrite: false,
+    isMessage: true,
+    isSubagentMessage: false,
+    isFinalAnswer: true,
+    messageId: finalMessageId,
+    messageKey: finalMessageKey,
+    sessionId: resolvedSessionId,
+  });
+  messageIndexById.set(finalMessageKey, queue.value.length - 1);
+  messageContentById.set(finalMessageKey, content);
+
+  // Register user→assistant mapping so SSE summary.diffs events can find the right key
+  if (messageFinish.parentID) {
+    userMessageToFinalKey.set(messageFinish.parentID, finalMessageKey);
+  }
+
+  scheduleFollowScroll();
 }
 
 function formatRetryTime(timestamp: number): string {
@@ -6173,7 +6700,7 @@ function applySessionStatusEvent(payload: unknown, eventType: string) {
     if (sessionId) setSessionStatus(sessionId, nextStatus, projectId);
     if (isSelectedSessionEvent && sessionId) {
       retryStatus.value = null;
-      selectedSessionStatus.value = nextStatus;
+      updateSubagentExpiry(sessionId, nextStatus);
       updateReasoningExpiry(sessionId, nextStatus);
     } else if (isAllowedSessionEvent && sessionId) {
       updateSubagentExpiry(sessionId, nextStatus);
@@ -6189,7 +6716,6 @@ function applySessionStatusEvent(payload: unknown, eventType: string) {
   }
   if (!isSelectedSessionEvent || !sessionId) return;
 
-  selectedSessionStatus.value = 'busy';
   updateReasoningExpiry(sessionId, 'busy');
   if (sessionStatus.message && typeof sessionStatus.next === 'number') {
     retryStatus.value = {
@@ -6804,6 +7330,131 @@ function registerMessageSummary(payload: unknown) {
     (record.id as string | undefined);
   const title = typeof summary?.title === 'string' ? summary.title : undefined;
   if (id && title) messageSummaryTitleById.set(id, title);
+
+  if (id && summary) {
+    const diffs = extractSummaryDiffs({ summary } as Record<string, unknown>);
+    if (diffs.length > 0) {
+      const finalKey = userMessageToFinalKey.get(id);
+      if (finalKey) {
+        messageDiffsByKey.set(finalKey, diffs);
+      }
+    }
+  }
+}
+
+function collectDiffsFromToolPart(
+  tool: string,
+  metadata: Record<string, unknown> | undefined,
+  input: Record<string, unknown> | undefined,
+): Array<{ file: string; diff: string }> {
+  const collected: Array<{ file: string; diff: string }> = [];
+  if (tool === 'edit') {
+    const diff = typeof metadata?.diff === 'string' ? metadata.diff : '';
+    const filePath = typeof input?.filePath === 'string' ? input.filePath : '';
+    if (diff.trim() && filePath) {
+      collected.push({ file: resolveWorktreeRelativePath(filePath) || filePath, diff });
+    }
+  } else if (tool === 'multiedit') {
+    const results = Array.isArray(metadata?.results) ? metadata.results : [];
+    const filePath = typeof input?.filePath === 'string' ? input.filePath : '';
+    results.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const diff = (item as Record<string, unknown>).diff;
+      if (typeof diff === 'string' && diff.trim() && filePath) {
+        collected.push({ file: resolveWorktreeRelativePath(filePath) || filePath, diff });
+      }
+    });
+  } else if (tool === 'apply_patch') {
+    const files = Array.isArray(metadata?.files) ? metadata.files : [];
+    files.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      const rec = item as Record<string, unknown>;
+      const diff = typeof rec.diff === 'string' ? rec.diff : '';
+      const filePath = typeof rec.file === 'string' ? rec.file : '';
+      if (diff.trim() && filePath) {
+        collected.push({ file: resolveWorktreeRelativePath(filePath) || filePath, diff });
+      }
+    });
+  }
+  return collected;
+}
+
+function extractMessageDiffsFromParts(parts: unknown[], messageId: string, sessionId: string) {
+  const messageKey = buildMessageKey(messageId, sessionId);
+  const collected: Array<{ file: string; diff: string }> = [];
+  parts.forEach((part) => {
+    if (!part || typeof part !== 'object') return;
+    const p = part as Record<string, unknown>;
+    if (p.type !== 'tool') return;
+    const tool = typeof p.tool === 'string' ? p.tool : '';
+    registerPartType(messageKey, 'tool');
+    const state =
+      p.state && typeof p.state === 'object'
+        ? (p.state as Record<string, unknown>)
+        : undefined;
+    if (!state) return;
+    const metadata =
+      state.metadata && typeof state.metadata === 'object'
+        ? (state.metadata as Record<string, unknown>)
+        : undefined;
+    const input =
+      state.input && typeof state.input === 'object'
+        ? (state.input as Record<string, unknown>)
+        : undefined;
+    collected.push(...collectDiffsFromToolPart(tool, metadata, input));
+  });
+  if (collected.length > 0) {
+    messageDiffsByKey.set(messageKey, collected);
+  }
+}
+
+function registerMessageDiff(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return;
+  const record = payload as Record<string, unknown>;
+  const nestedPayload =
+    record.payload && typeof record.payload === 'object'
+      ? (record.payload as Record<string, unknown>)
+      : undefined;
+  const properties =
+    (nestedPayload?.properties && typeof nestedPayload.properties === 'object'
+      ? (nestedPayload.properties as Record<string, unknown>)
+      : undefined) ??
+    (record.properties && typeof record.properties === 'object'
+      ? (record.properties as Record<string, unknown>)
+      : undefined);
+  const part =
+    properties?.part && typeof properties.part === 'object'
+      ? (properties.part as Record<string, unknown>)
+      : undefined;
+  if (!part || part.type !== 'tool') return;
+  const tool = typeof part.tool === 'string' ? part.tool : '';
+  const state =
+    part.state && typeof part.state === 'object'
+      ? (part.state as Record<string, unknown>)
+      : undefined;
+  if (!state) return;
+  const metadata =
+    state.metadata && typeof state.metadata === 'object'
+      ? (state.metadata as Record<string, unknown>)
+      : undefined;
+  const input =
+    state.input && typeof state.input === 'object'
+      ? (state.input as Record<string, unknown>)
+      : undefined;
+  const messageId =
+    (part.messageID as string | undefined) ??
+    (part.messageId as string | undefined);
+  const sessionId =
+    (typeof part.sessionID === 'string' ? (part.sessionID as string) : undefined) ??
+    extractSessionId(payload);
+  if (!messageId) return;
+  const messageKey = buildMessageKey(messageId, sessionId);
+  registerPartType(messageKey, 'tool');
+  const collected = collectDiffsFromToolPart(tool, metadata, input);
+  if (collected.length > 0) {
+    const existing = messageDiffsByKey.get(messageKey) ?? [];
+    messageDiffsByKey.set(messageKey, [...existing, ...collected]);
+  }
 }
 
 function extractSessionInfo(payload: unknown, eventType: string) {
@@ -7269,6 +7920,7 @@ function connect() {
 
     registerMessageMeta(payload);
     registerMessageSummary(payload);
+    registerMessageDiff(payload);
 
     const attachmentUpdate = extractMessageAttachments(payload);
     if (attachmentUpdate?.messageId) {
@@ -7311,6 +7963,9 @@ function connect() {
       if (markReasoningFinished(messageFinish.sessionId ?? sessionId, messageFinish.messageId)) {
         scheduleReasoningClose(messageFinish.sessionId ?? sessionId);
       }
+      if (messageFinish.finish === 'stop') {
+        promoteFinalAnswerToOutputPanel(messageFinish, sessionId);
+      }
     }
 
     const patchEvents = extractPatch(payload);
@@ -7321,8 +7976,11 @@ function connect() {
       return;
     }
 
-    const fileRead = extractFileRead(payload, resolvedEventType);
-    if (!fileRead) {
+    const fileReadResult = extractFileRead(payload, resolvedEventType);
+    const fileReads = fileReadResult
+      ? Array.isArray(fileReadResult) ? fileReadResult : [fileReadResult]
+      : null;
+    if (!fileReads) {
       const message = extractMessage(payload, resolvedEventType);
       if (!message) {
         if (attachmentUpdate?.messageId && attachmentUpdate.attachments.length > 0) {
@@ -7377,12 +8035,20 @@ function connect() {
       }
       const isReasoning = message.partType === 'reasoning';
       const reasoningKey = getReasoningKey(sessionId);
+      const isUserMessage =
+        message.role === 'user' ||
+        userMessageIds.has(message.id) ||
+        (message.messageId ? userMessageIds.has(message.messageId) : false);
+      const isSessionWindow = !isReasoning && !isUserMessage;
       const stableMessageId = isReasoning
         ? `reasoning:${reasoningKey}`
-        : (message.messageId ?? message.id);
+        : isSessionWindow
+          ? `session:${sessionId ?? selectedSessionId.value ?? 'unknown'}`
+          : (message.messageId ?? message.id);
       const messageKey = buildMessageKey(stableMessageId, sessionId);
       const isSubagentMessage =
         isReasoning ||
+        isSessionWindow ||
         Boolean(sessionId && selectedSessionId.value && sessionId !== selectedSessionId.value);
       const isFloatingMessage = isReasoning || isSubagentMessage;
       if (isReasoning) {
@@ -7422,7 +8088,15 @@ function connect() {
         lastReasoningMessageIdByKey.set(messageKey, reasoningMessageId);
       }
       let mergedContent = message.content;
-      if (message.partId && message.messageId) {
+      if (isSessionWindow && message.messageId) {
+        const partMap = messagePartsById.get(messageKey) ?? new Map<string, string>();
+        partMap.set(message.messageId, message.content);
+        messagePartsById.set(messageKey, partMap);
+        const order = messagePartOrderById.get(messageKey) ?? [];
+        if (!order.includes(message.messageId)) order.push(message.messageId);
+        messagePartOrderById.set(messageKey, order);
+        mergedContent = order.map((key) => partMap.get(key) ?? '').filter(Boolean).join('\n\n---\n\n');
+      } else if (message.partId && message.messageId) {
         const partMap = messagePartsById.get(messageKey) ?? new Map<string, string>();
         partMap.set(message.partId, message.content);
         messagePartsById.set(messageKey, partMap);
@@ -7442,15 +8116,13 @@ function connect() {
         mergedContent = message.bodyContent;
       }
       if (!mergedContent || mergedContent.trim().length === 0) {
-        const emptyIndex = messageIndexById.get(messageKey);
-        if (emptyIndex !== undefined) queue.value.splice(emptyIndex, 1);
+        if (!isSessionWindow) {
+          const emptyIndex = messageIndexById.get(messageKey);
+          if (emptyIndex !== undefined) queue.value.splice(emptyIndex, 1);
+        }
         return;
       }
 
-      const isUserMessage =
-        message.role === 'user' ||
-        userMessageIds.has(message.id) ||
-        (message.messageId ? userMessageIds.has(message.messageId) : false);
       const resolvedMeta = resolveUserMessageMetaForMessage(
         message.messageId,
         message.id,
@@ -7588,7 +8260,7 @@ function connect() {
       return;
     }
 
-    upsertToolEntry(fileRead, e.type);
+    fileReads.forEach((entry) => upsertToolEntry(entry, e.type));
   };
 
   src.value.addEventListener('message', handleEvent);

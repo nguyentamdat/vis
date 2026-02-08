@@ -21,19 +21,6 @@
             :style="getEntryStyle(q)"
           >
           <div
-            v-if="q.role === 'user' && q.messageId && q.sessionId"
-            class="output-entry-actions"
-          >
-            <button type="button" class="output-entry-action" @click="confirmFork(q)">fork</button>
-            <button
-              type="button"
-              class="output-entry-action output-entry-action-danger"
-              @click="confirmRevert(q)"
-            >
-              revert
-            </button>
-          </div>
-          <div
             v-if="q.role === 'user' && formatMessageAgent(q)"
             class="output-entry-agent"
             :style="getAgentTextStyle(q)"
@@ -69,16 +56,40 @@
             </div>
           </div>
           <div
-            v-if="formatMessageMeta(q)"
-            class="output-entry-meta"
+            v-if="hasFooter(q)"
+            class="output-entry-footer"
           >
-            {{ formatMessageMeta(q) }}
-          </div>
-          <div
-            v-if="formatMessageUsage(q)"
-            class="output-entry-usage"
-          >
-            {{ formatMessageUsage(q) }}
+            <div class="output-entry-footer-left">
+              <span v-if="formatMessageMeta(q)" class="output-entry-meta">{{ formatMessageMeta(q) }}</span>
+              <span v-if="formatMessageMeta(q) && formatMessageUsage(q)" class="output-entry-sep">•</span>
+              <span v-if="formatMessageUsage(q)" class="output-entry-usage">{{ formatMessageUsage(q) }}</span>
+            </div>
+            <div class="output-entry-footer-right">
+              <button
+                v-if="q.role === 'assistant' && q.messageKey && hasMessageDiffs(q.messageKey)"
+                type="button"
+                class="output-entry-action output-entry-action-diff"
+                @click="showMessageDiff(q)"
+              >
+                DIFF
+              </button>
+              <button
+                v-if="q.role === 'user' && q.messageId && q.sessionId"
+                type="button"
+                class="output-entry-action"
+                @click="confirmFork(q)"
+              >
+                fork
+              </button>
+              <button
+                v-if="q.role === 'user' && q.messageId && q.sessionId"
+                type="button"
+                class="output-entry-action output-entry-action-danger"
+                @click="confirmRevert(q)"
+              >
+                revert
+              </button>
+            </div>
           </div>
           </div>
           <button
@@ -94,7 +105,7 @@
       </div>
       <div class="statusbar" role="status" aria-live="polite">
         <div class="statusbar-section statusbar-left">
-          <span class="statusbar-text">{{ isThinking ? `Thinking${thinkingSuffix}` : 'Idle' }}</span>
+          <span class="statusbar-text">{{ thinkingDisplayText }}</span>
         </div>
         <div class="statusbar-section statusbar-right" :class="{ 'is-error': isStatusError, 'is-retry': isRetryStatus }">
           {{ statusText }}
@@ -105,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import MessageViewer from './MessageViewer.vue';
 type FileReadEntry = {
   time: number;
@@ -148,6 +159,36 @@ type FileReadEntry = {
   messageId?: string;
   messageKey?: string;
   callId?: string;
+  isRound?: boolean;
+  roundId?: string;
+  roundMessages?: RoundMessage[];
+  roundDiffs?: Array<{ file: string; diff: string; before?: string; after?: string }>;
+};
+
+type RoundMessage = {
+  messageId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  attachments?: Array<{ id: string; url: string; mime: string; filename: string }>;
+  agent?: string;
+  model?: string;
+  providerId?: string;
+  modelId?: string;
+  variant?: string;
+  time?: number;
+  usage?: {
+    tokens: {
+      input: number;
+      output: number;
+      reasoning: number;
+      cache?: {
+        read: number;
+        write: number;
+      };
+    };
+    cost?: number;
+    contextPercent?: number | null;
+  };
 };
 
 const props = defineProps<{
@@ -157,8 +198,10 @@ const props = defineProps<{
   isStatusError: boolean;
   isThinking: boolean;
   isRetryStatus?: boolean;
+  busyDescendantCount?: number;
   theme: string;
   resolveAgentColor?: (agent?: string) => string;
+  messageDiffs?: Map<string, Array<{ file: string; diff: string; before?: string; after?: string }>>;
 }>();
 
 const emit = defineEmits<{
@@ -168,6 +211,7 @@ const emit = defineEmits<{
   (event: 'resume-follow'): void;
   (event: 'fork-message', payload: { sessionId: string; messageId: string }): void;
   (event: 'revert-message', payload: { sessionId: string; messageId: string }): void;
+  (event: 'show-message-diff', payload: { messageKey: string; diffs: Array<{ file: string; diff: string; before?: string; after?: string }> }): void;
 }>();
 
 const panelEl = ref<HTMLDivElement | null>(null);
@@ -178,6 +222,14 @@ const thinkingSuffix = ref('');
 let thinkingTimer: number | undefined;
 let contentResizeObserver: ResizeObserver | undefined;
 let followResizeFrame: number | undefined;
+
+const thinkingDisplayText = computed(() => {
+  if (!props.isThinking) return '🟢 Idle';
+  const descendants = props.busyDescendantCount ?? 0;
+  const total = Math.max(1, 1 + descendants);
+  const heads = '🤔'.repeat(Math.min(total, 8));
+  return `${heads} Thinking${thinkingSuffix.value}`;
+});
 
 function scheduleFollowScrollIfNeeded() {
   if (!props.isFollowing) return;
@@ -208,6 +260,18 @@ function setupContentResizeObserver() {
   contentResizeObserver.observe(target);
 }
 
+function hasMessageDiffs(messageKey: string) {
+  const diffs = props.messageDiffs?.get(messageKey);
+  return Boolean(diffs && diffs.length > 0);
+}
+
+function showMessageDiff(entry: FileReadEntry) {
+  if (!entry.messageKey) return;
+  const diffs = props.messageDiffs?.get(entry.messageKey);
+  if (!diffs || diffs.length === 0) return;
+  emit('show-message-diff', { messageKey: entry.messageKey, diffs });
+}
+
 function confirmFork(entry: FileReadEntry) {
   if (!entry.sessionId || !entry.messageId || entry.role !== 'user') return;
   if (!window.confirm('Fork from this message?')) return;
@@ -220,15 +284,20 @@ function confirmRevert(entry: FileReadEntry) {
   emit('revert-message', { sessionId: entry.sessionId, messageId: entry.messageId });
 }
 
+function hasFooter(entry: FileReadEntry) {
+  if (formatMessageMeta(entry)) return true;
+  if (formatMessageUsage(entry)) return true;
+  if (entry.role === 'user' && entry.messageId && entry.sessionId) return true;
+  if (entry.role === 'assistant' && entry.messageKey && hasMessageDiffs(entry.messageKey)) return true;
+  return false;
+}
+
 function formatMessageMeta(entry: FileReadEntry) {
   const model = entry.messageModel?.trim();
   const variant = entry.messageVariant?.trim();
-  const baseParts: string[] = [];
-  if (model) baseParts.push(model);
-  if (variant) baseParts.push(`(${variant})`);
-  const base = baseParts.join(' ');
+  const modelPart = variant ? `${model} (${variant})` : (model || '');
   const timestamp = formatMessageTime(entry.messageTime);
-  return [base, timestamp].filter((part) => part).join(' • ');
+  return [timestamp, modelPart].filter(Boolean).join(' - ');
 }
 
 function formatMessageUsage(entry: FileReadEntry) {
@@ -393,6 +462,8 @@ defineExpose({ panelEl });
 
 .output-entry {
   position: relative;
+  display: flex;
+  flex-direction: column;
   background: rgba(2, 6, 23, 0.6);
   border: 1px solid #1e293b;
   border-radius: 10px;
@@ -406,7 +477,7 @@ defineExpose({ panelEl });
   background: rgba(15, 23, 42, 0.72);
   border-color: rgba(148, 163, 184, 0.55);
   padding-top: 18px;
-  padding-bottom: 18px;
+  padding-bottom: 10px;
 }
 
 .output-entry-inner {
@@ -425,13 +496,51 @@ defineExpose({ panelEl });
   color: rgba(191, 219, 254, 0.9);
 }
 
-.output-entry-actions {
-  position: absolute;
-  top: 6px;
-  right: 8px;
+.output-entry-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 18px;
+}
+
+.output-entry-footer-left {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.output-entry-footer-right {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+.output-entry-meta {
+  font-size: 10px;
+  color: rgba(191, 219, 254, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.output-entry-sep {
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.5);
+  flex-shrink: 0;
+}
+
+.output-entry-usage {
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .output-entry-action {
@@ -443,6 +552,7 @@ defineExpose({ panelEl });
   line-height: 1;
   padding: 3px 7px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .output-entry-action:hover {
@@ -459,22 +569,16 @@ defineExpose({ panelEl });
   background: rgba(153, 27, 27, 0.5);
 }
 
-.output-entry-meta {
-  position: absolute;
-  bottom: 6px;
-  right: 10px;
-  font-size: 10px;
-  color: rgba(191, 219, 254, 0.9);
-  text-align: right;
+.output-entry-action-diff {
+  border-color: rgba(96, 165, 250, 0.7);
+  background: rgba(30, 58, 138, 0.35);
+  color: #bfdbfe;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
-.output-entry-usage {
-  position: absolute;
-  right: 10px;
-  bottom: 22px;
-  font-size: 10px;
-  color: rgba(148, 163, 184, 0.9);
-  text-align: right;
+.output-entry-action-diff:hover {
+  background: rgba(30, 64, 175, 0.55);
 }
 
 .output-panel-shell .shiki-host {
