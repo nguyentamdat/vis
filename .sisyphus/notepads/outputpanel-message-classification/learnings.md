@@ -17,3 +17,8 @@
 - `OutputPanel` now formats `formatRoundMeta` from the LAST assistant message for model/time (most relevant) instead of the round root.
 - `filteredQueue` computed property replaces inline filter for better performance and readability.
 - Round sub-messages use `MessageViewer` with `round-msg-indicator` for role differentiation (blue/green).
+
+## 2026-02-09 Task 6: queue scans + GC indexing for rounds
+- GC index rebuild now maps each `roundMessages[].messageId` to the round's queue index, so `messageIndexById` resolves both round root IDs and nested IDs.
+- `applyUserMessageMetaToQueue` and `applyUserMessageTimeToQueue` now update matching sub-messages inside round entries and replace `roundMessages` arrays to trigger Vue reactivity.
+- `applyMessageUsageToQueue` now updates usage/provider/model/context percent for round sub-messages (including SSE usage updates for assistant messages nested in rounds).

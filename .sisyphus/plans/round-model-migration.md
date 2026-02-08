@@ -615,7 +615,7 @@ Note: Due to the intertwined nature of App.vue modifications (all touching the s
 
 ---
 
-- [ ] 6. Adapt Queue Scanning Functions + GC Timer
+- [x] 6. Adapt Queue Scanning Functions + GC Timer
 
   **What to do**:
   - **GC timer** (App.vue:4332-4368):

@@ -3071,6 +3071,50 @@ function applyMessageUsageToQueue(messageId: string, sessionId: string | undefin
   const messageKey = sessionId ? buildMessageKey(messageId, sessionId) : undefined;
   if (messageKey) messageUsageByKey.set(messageKey, usage);
   const index = messageKey ? messageIndexById.get(messageKey) : undefined;
+  const updateRoundEntry = (entryIndex: number) => {
+    const existing = queue.value[entryIndex];
+    if (!existing || !existing.isMessage || !existing.isRound) return false;
+    if (sessionId && existing.sessionId && existing.sessionId !== sessionId) return false;
+    const existingRoundMessages = existing.roundMessages ?? [];
+    const roundMessageIndex = existingRoundMessages.findIndex((entry) => entry.messageId === messageId);
+    if (roundMessageIndex < 0) return false;
+    const currentRoundMessage = existingRoundMessages[roundMessageIndex];
+    if (!currentRoundMessage) return false;
+    const providerId = usage.providerId ?? currentRoundMessage.providerId ?? existing.messageProviderId;
+    const modelId = usage.modelId ?? currentRoundMessage.modelId ?? existing.messageModelId;
+    const contextPercent =
+      usage.contextPercent ?? computeContextPercent(usage.tokens, providerId, modelId);
+    const nextRoundMessage: RoundMessage = {
+      ...currentRoundMessage,
+      providerId: providerId ?? undefined,
+      modelId: modelId ?? undefined,
+      usage: {
+        ...usage,
+        providerId: providerId ?? undefined,
+        modelId: modelId ?? undefined,
+        contextPercent,
+      },
+    };
+    const nextRoundMessages = [...existingRoundMessages];
+    nextRoundMessages.splice(roundMessageIndex, 1, nextRoundMessage);
+    queue.value.splice(entryIndex, 1, {
+      ...existing,
+      messageProviderId:
+        existing.messageId === messageId ? (providerId ?? undefined) : existing.messageProviderId,
+      messageModelId: existing.messageId === messageId ? (modelId ?? undefined) : existing.messageModelId,
+      messageUsage:
+        existing.messageId === messageId
+          ? {
+              ...usage,
+              providerId: providerId ?? undefined,
+              modelId: modelId ?? undefined,
+              contextPercent,
+            }
+          : existing.messageUsage,
+      roundMessages: nextRoundMessages,
+    });
+    return true;
+  };
   const updateEntry = (entryIndex: number) => {
     const existing = queue.value[entryIndex];
     if (!existing || !existing.isMessage) return;
@@ -3091,13 +3135,15 @@ function applyMessageUsageToQueue(messageId: string, sessionId: string | undefin
     });
   };
   if (index !== undefined) {
+    if (updateRoundEntry(index)) return;
     updateEntry(index);
     return;
   }
   queue.value.forEach((entry, entryIndex) => {
     if (!entry.isMessage) return;
-    if (entry.messageId !== messageId) return;
     if (sessionId && entry.sessionId && entry.sessionId !== sessionId) return;
+    if (updateRoundEntry(entryIndex)) return;
+    if (entry.messageId !== messageId) return;
     updateEntry(entryIndex);
   });
 }
@@ -3180,7 +3226,32 @@ function applyUserMessageMetaToQueue(messageId: string, meta: UserMessageMeta) {
       entry.isReasoning &&
         activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
     );
-    if (!entry.isMessage || (entry.messageId !== messageId && !matchesReasoningMessage)) return;
+    if (!entry.isMessage) return;
+    if (entry.isRound && entry.roundMessages) {
+      const existingRoundMessages = entry.roundMessages;
+      const roundMessageIndex = existingRoundMessages.findIndex((roundEntry) => roundEntry.messageId === messageId);
+      if (roundMessageIndex >= 0) {
+        const roundMessage = existingRoundMessages[roundMessageIndex];
+        if (!roundMessage) return;
+        const nextRoundMessages = [...existingRoundMessages];
+        nextRoundMessages.splice(roundMessageIndex, 1, {
+          ...roundMessage,
+          agent: displayMeta.agent ?? roundMessage.agent,
+          model: displayMeta.model ?? roundMessage.model,
+          variant: displayMeta.variant ?? roundMessage.variant,
+        });
+        queue.value.splice(index, 1, {
+          ...entry,
+          messageAgent: entry.messageId === messageId ? (displayMeta.agent ?? entry.messageAgent) : entry.messageAgent,
+          messageModel: entry.messageId === messageId ? (displayMeta.model ?? entry.messageModel) : entry.messageModel,
+          messageVariant:
+            entry.messageId === messageId ? (displayMeta.variant ?? entry.messageVariant) : entry.messageVariant,
+          roundMessages: nextRoundMessages,
+        });
+        return;
+      }
+    }
+    if (entry.messageId !== messageId && !matchesReasoningMessage) return;
     queue.value.splice(index, 1, {
       ...entry,
       messageAgent: displayMeta.agent ?? entry.messageAgent,
@@ -3196,7 +3267,27 @@ function applyUserMessageTimeToQueue(messageId: string, messageTime: number) {
       entry.isReasoning &&
         activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
     );
-    if (!entry.isMessage || (entry.messageId !== messageId && !matchesReasoningMessage)) return;
+    if (!entry.isMessage) return;
+    if (entry.isRound && entry.roundMessages) {
+      const existingRoundMessages = entry.roundMessages;
+      const roundMessageIndex = existingRoundMessages.findIndex((roundEntry) => roundEntry.messageId === messageId);
+      if (roundMessageIndex >= 0) {
+        const roundMessage = existingRoundMessages[roundMessageIndex];
+        if (!roundMessage) return;
+        const nextRoundMessages = [...existingRoundMessages];
+        nextRoundMessages.splice(roundMessageIndex, 1, {
+          ...roundMessage,
+          time: messageTime,
+        });
+        queue.value.splice(index, 1, {
+          ...entry,
+          messageTime: entry.messageId === messageId ? messageTime : entry.messageTime,
+          roundMessages: nextRoundMessages,
+        });
+        return;
+      }
+    }
+    if (entry.messageId !== messageId && !matchesReasoningMessage) return;
     queue.value.splice(index, 1, {
       ...entry,
       messageTime,
@@ -4482,6 +4573,13 @@ setInterval(() => {
     if (entry.messageId) {
       const messageKey = buildMessageKey(entry.messageId, entry.sessionId);
       messageIndexById.set(messageKey, index);
+      if (entry.isRound && entry.roundMessages) {
+        entry.roundMessages.forEach((roundMessage) => {
+          if (!roundMessage.messageId) return;
+          const childKey = buildMessageKey(roundMessage.messageId, entry.sessionId);
+          messageIndexById.set(childKey, index);
+        });
+      }
     }
     if (entry.callId) toolIndexByCallId.set(entry.callId, index);
     if (entry.isMessage && entry.messageId) {
