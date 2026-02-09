@@ -19,9 +19,7 @@ export type CodeRenderResult = {
   error: Ref<string>;
 };
 
-export function useCodeRender(
-  params: WatchSource<CodeRenderParams | null>,
-): CodeRenderResult {
+export function useCodeRender(params: WatchSource<CodeRenderParams | null>): CodeRenderResult {
   const html = ref('');
   const error = ref('');
   let requestId = 0;

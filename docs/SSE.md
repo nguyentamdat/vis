@@ -1,6 +1,7 @@
 # SSE
 
 ## Event Envelope
+
 Each SSE message uses a single `data:` line containing a JSON object:
 
 ```text
@@ -9,11 +10,13 @@ data: {"directory":"/abs/or/relative/path","payload":{"type":"...","properties":
 ```
 
 Common fields:
+
 - directory: Workspace directory the event belongs to.
 - payload.type: Event type name.
 - payload.properties: Event-specific data.
 
 ## Event Types
+
 Below lists each `payload.type` and its `properties` fields.
 
 - server.instance.disposed
@@ -112,9 +115,11 @@ Below lists each `payload.type` and its `properties` fields.
   - (arbitrary fields)
 
 ## Core Payload Shapes
+
 These are the main object shapes referenced above.
 
 Message
+
 - id: string
 - sessionID: string
 - role: user | assistant
@@ -129,6 +134,7 @@ Message
 - error?: ProviderAuthError | UnknownError | MessageOutputLengthError | MessageAbortedError | ApiError
 
 Part
+
 - type: text | reasoning | file | tool | step-start | step-finish | snapshot | patch | agent | retry | compaction | subtask
 - id: string
 - sessionID: string
@@ -142,6 +148,7 @@ Part
 - delta?: string (only on message.part.updated)
 
 ToolState
+
 - status: pending | running | completed | error
 - input: object
 - raw?: string
@@ -154,6 +161,7 @@ ToolState
 - attachments?: FilePart[]
 
 ## Tool Window Rendering (UI)
+
 The frontend renders tool windows from `Part.type === "tool"` events.
 
 - `pending`: not rendered.
@@ -162,24 +170,25 @@ The frontend renders tool windows from `Part.type === "tool"` events.
 
 Content selection follows the current UI logic in `app/App.vue`.
 
-| Tool | Status used | Content source (first match) | Notes |
-| --- | --- | --- | --- |
-| `read` | `running`, `completed`, `error` | `state.output` (parsed `<file>` body) | Title/path from `input.filePath`. Images/PDFs are attachments. |
-| `write` | `running`, `completed`, `error` | `state.output` or `state.error` | Title/path from `input.filePath`. |
-| `edit` | `running`, `completed`, `error` | `state.metadata.diff` or `state.output` / `state.error` | Diff is preferred when present. |
-| `multiedit` | `running`, `completed`, `error` | `state.metadata.results[].diff` or `state.output` / `state.error` | Multiple diffs are joined with blank lines. |
-| `apply_patch` | `running` | `state.input.patchText` parsed into blocks, then `state.metadata.files[].diff` if present | Completed/error update status only (no content refresh). |
-| `bash` | `running`, `completed`, `error` | `state.output` or `state.error` | Output is formatted with the command line. |
-| `grep` | `running`, `completed`, `error` | `state.output` | When parseable, source lines are shown with a grep gutter. |
-| `glob` | `running`, `completed`, `error` | `state.output` | Title/path from `input.path`. |
-| `list` | `running`, `completed`, `error` | `state.output` | Title/path from `input.path`. |
-| `webfetch` | `running`, `completed`, `error` | `state.output` | Language depends on `input.format`. |
-| `websearch` / `codesearch` | `running`, `completed`, `error` | `state.output` | Rendered as markdown. |
-| `task` | `running`, `completed`, `error` | `state.output` | Output is normalized to markdown. |
-| `batch` | `running`, `completed`, `error` | `state.output` | Rendered as plain text. |
-| `plan_enter` / `plan_exit` | `running`, `completed`, `error` | `state.output` | Title uses `state.title` when present. |
+| Tool                       | Status used                     | Content source (first match)                                                              | Notes                                                          |
+| -------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `read`                     | `running`, `completed`, `error` | `state.output` (parsed `<file>` body)                                                     | Title/path from `input.filePath`. Images/PDFs are attachments. |
+| `write`                    | `running`, `completed`, `error` | `state.output` or `state.error`                                                           | Title/path from `input.filePath`.                              |
+| `edit`                     | `running`, `completed`, `error` | `state.metadata.diff` or `state.output` / `state.error`                                   | Diff is preferred when present.                                |
+| `multiedit`                | `running`, `completed`, `error` | `state.metadata.results[].diff` or `state.output` / `state.error`                         | Multiple diffs are joined with blank lines.                    |
+| `apply_patch`              | `running`                       | `state.input.patchText` parsed into blocks, then `state.metadata.files[].diff` if present | Completed/error update status only (no content refresh).       |
+| `bash`                     | `running`, `completed`, `error` | `state.output` or `state.error`                                                           | Output is formatted with the command line.                     |
+| `grep`                     | `running`, `completed`, `error` | `state.output`                                                                            | When parseable, source lines are shown with a grep gutter.     |
+| `glob`                     | `running`, `completed`, `error` | `state.output`                                                                            | Title/path from `input.path`.                                  |
+| `list`                     | `running`, `completed`, `error` | `state.output`                                                                            | Title/path from `input.path`.                                  |
+| `webfetch`                 | `running`, `completed`, `error` | `state.output`                                                                            | Language depends on `input.format`.                            |
+| `websearch` / `codesearch` | `running`, `completed`, `error` | `state.output`                                                                            | Rendered as markdown.                                          |
+| `task`                     | `running`, `completed`, `error` | `state.output`                                                                            | Output is normalized to markdown.                              |
+| `batch`                    | `running`, `completed`, `error` | `state.output`                                                                            | Rendered as plain text.                                        |
+| `plan_enter` / `plan_exit` | `running`, `completed`, `error` | `state.output`                                                                            | Title uses `state.title` when present.                         |
 
 FilePart
+
 - id: string
 - sessionID: string
 - messageID: string
@@ -190,6 +199,7 @@ FilePart
 - source?: FileSource | SymbolSource
 
 FileSource
+
 - type: file
 - path: string
 - text.value: string
@@ -197,6 +207,7 @@ FileSource
 - text.end: number
 
 SymbolSource
+
 - type: symbol
 - path: string
 - name: string
@@ -210,6 +221,7 @@ SymbolSource
 - text.end: number
 
 FileDiff
+
 - file: string
 - before: string
 - after: string
@@ -217,6 +229,7 @@ FileDiff
 - deletions: number
 
 Session
+
 - id: string
 - projectID: string
 - directory: string
@@ -237,12 +250,14 @@ Session
 - revert?.diff?: string
 
 Todo
+
 - content: string
 - status: pending | in_progress | completed | cancelled
 - priority: high | medium | low
 - id: string
 
 Pty
+
 - id: string
 - title: string
 - command: string
@@ -252,23 +267,28 @@ Pty
 - pid: number
 
 ProviderAuthError
+
 - name: ProviderAuthError
 - data.providerID: string
 - data.message: string
 
 UnknownError
+
 - name: UnknownError
 - data.message: string
 
 MessageOutputLengthError
+
 - name: MessageOutputLengthError
 - data: object
 
 MessageAbortedError
+
 - name: MessageAbortedError
 - data.message: string
 
 ApiError
+
 - name: APIError
 - data.message: string
 - data.statusCode?: number

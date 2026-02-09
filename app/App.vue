@@ -152,7 +152,16 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import { bundledThemes } from 'shiki/bundle/web';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
@@ -206,12 +215,7 @@ const MAIN_REASONING_TITLE = 'Reasoning';
 const REASONING_CLOSE_DELAY_MS = 3000;
 const SHELL_PTY_STORAGE_KEY = 'opencode.shellPtys';
 const COMPOSER_DRAFT_STORAGE_KEY = 'opencode.composerDrafts.v1';
-const ATTACHMENT_MIME_ALLOWLIST = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-]);
+const ATTACHMENT_MIME_ALLOWLIST = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 type FileReadEntry = {
   time: number;
@@ -329,7 +333,6 @@ type FileNode = {
   type?: string;
   ignored?: boolean;
 };
-
 
 type FileContentResponse = {
   content?: string;
@@ -522,14 +525,17 @@ const shellPtyIdsBySessionId = new Map<string, Set<string>>();
 const pendingShellFits = new Map<string, number>();
 const pendingToolScrollFrames = new Map<string, number>();
 const pendingReadFullCodeByCallId = new Map<string, string>();
-const pendingReadInfoByCallId = new Map<string, {
-  path: string;
-  readOffset: number;
-  readLimit?: number;
-  lang?: string;
-  toolTitle?: string;
-  eventType: string;
-}>();
+const pendingReadInfoByCallId = new Map<
+  string,
+  {
+    path: string;
+    readOffset: number;
+    readLimit?: number;
+    lang?: string;
+    toolTitle?: string;
+    eventType: string;
+  }
+>();
 const permissionSendingById = ref<Record<string, boolean>>({});
 const permissionErrorById = ref<Record<string, string>>({});
 const questionSendingById = ref<Record<string, boolean>>({});
@@ -652,7 +658,9 @@ const modelOptions = ref<
     attachmentCapable?: boolean;
   }>
 >([]);
-const agentOptions = ref<Array<{ id: string; label: string; description?: string; color?: string }>>([]);
+const agentOptions = ref<
+  Array<{ id: string; label: string; description?: string; color?: string }>
+>([]);
 const thinkingOptions = ref<Array<string | undefined>>([]);
 const providersLoaded = ref(false);
 const providersLoading = ref(false);
@@ -716,8 +724,8 @@ const filteredSessions = computed(() =>
   }),
 );
 
-const activeDirectory = computed(() =>
-  selectedWorktreeDir.value || selectedProjectDirectory.value || '',
+const activeDirectory = computed(
+  () => selectedWorktreeDir.value || selectedProjectDirectory.value || '',
 );
 
 const allowedSessionIds = computed(() => {
@@ -778,8 +786,8 @@ const expandedTreePaths = computed(() => Array.from(expandedTreePathSet.value));
 const canSend = computed(() =>
   Boolean(
     selectedSessionId.value &&
-      !isSending.value &&
-      (messageInput.value.trim().length > 0 || attachments.value.length > 0),
+    !isSending.value &&
+    (messageInput.value.trim().length > 0 || attachments.value.length > 0),
   ),
 );
 
@@ -1133,8 +1141,6 @@ function resolveProjectIdForSession(sessionId: string) {
   return '';
 }
 
-
-
 function clearComposerInputState() {
   messageInput.value = '';
   attachments.value = [];
@@ -1232,7 +1238,6 @@ function handleSelectedThinkingUpdate(value: string | undefined) {
   selectedThinking.value = value;
   persistComposerDraftForCurrentContext();
 }
-
 
 function handleComposerDraftStorage(event: StorageEvent) {
   if (event.storageArea !== window.localStorage) return;
@@ -1990,8 +1995,17 @@ function handlePointerMove(event: PointerEvent) {
     return;
   }
   if (resizeState.value) {
-    const { entry, startX, startY, startWidth, startHeight, minWidth, minHeight, maxWidth, maxHeight } =
-      resizeState.value;
+    const {
+      entry,
+      startX,
+      startY,
+      startWidth,
+      startHeight,
+      minWidth,
+      minHeight,
+      maxWidth,
+      maxHeight,
+    } = resizeState.value;
     const dx = event.clientX - startX;
     const dy = event.clientY - startY;
     entry.width = clamp(startWidth + dx, minWidth, maxWidth);
@@ -2215,7 +2229,10 @@ function removeSessionFromGraph(sessionId: string) {
 
 async function fetchHomePath() {
   try {
-    const data = (await opencodeApi.getPathInfo(OPENCODE_BASE_URL)) as { home?: string; worktree?: string };
+    const data = (await opencodeApi.getPathInfo(OPENCODE_BASE_URL)) as {
+      home?: string;
+      worktree?: string;
+    };
     if (typeof data.home === 'string' && data.home.trim()) {
       homePath.value = data.home.trim();
     }
@@ -2277,25 +2294,33 @@ function projectSessionDirectories(project?: ProjectInfo) {
   );
 }
 
-async function fetchSessions(options: {
-  directory?: string;
-  roots?: boolean;
-  search?: string;
-  limit?: number;
-} = {}) {
+async function fetchSessions(
+  options: {
+    directory?: string;
+    roots?: boolean;
+    search?: string;
+    limit?: number;
+  } = {},
+) {
   const list = await listSessionsByDirectory(options);
-  if (options.directory && selectedWorktreeDir.value && options.directory !== selectedWorktreeDir.value) {
+  if (
+    options.directory &&
+    selectedWorktreeDir.value &&
+    options.directory !== selectedWorktreeDir.value
+  ) {
     return;
   }
   setSessions(list);
 }
 
-async function listSessionsByDirectory(options: {
-  directory?: string;
-  roots?: boolean;
-  search?: string;
-  limit?: number;
-} = {}) {
+async function listSessionsByDirectory(
+  options: {
+    directory?: string;
+    roots?: boolean;
+    search?: string;
+    limit?: number;
+  } = {},
+) {
   sessionError.value = '';
   try {
     const data = (await opencodeApi.listSessions(OPENCODE_BASE_URL, options)) as SessionInfo[];
@@ -2462,7 +2487,9 @@ async function createNewSession() {
     )) as SessionInfo;
     if (data && typeof data.id === 'string') {
       const matchesDirectory =
-        !data.directory || data.directory === selectedWorktreeDir.value || !selectedWorktreeDir.value;
+        !data.directory ||
+        data.directory === selectedWorktreeDir.value ||
+        !selectedWorktreeDir.value;
       if (matchesDirectory) {
         const existing = sessions.value.find((session) => session.id === data.id);
         if (!existing) sessions.value.unshift(data);
@@ -2573,7 +2600,9 @@ async function bootstrapSelections() {
     }
 
     if (selectedProjectId.value && selectedSessionId.value) {
-      const selectedProject = projects.value.find((project) => project.id === selectedProjectId.value);
+      const selectedProject = projects.value.find(
+        (project) => project.id === selectedProjectId.value,
+      );
       if (!selectedProject) {
         selectedProjectId.value = '';
         selectedSessionId.value = '';
@@ -2589,7 +2618,8 @@ async function bootstrapSelections() {
           const list = await listSessionsByDirectory({ directory });
           const found = list.find(
             (session) =>
-              session.id === selectedSessionId.value && session.projectID === selectedProjectId.value,
+              session.id === selectedSessionId.value &&
+              session.projectID === selectedProjectId.value,
           );
           if (!found) return null;
           return { directory };
@@ -2652,7 +2682,6 @@ async function bootstrapSelections() {
   }
 }
 
-
 async function fetchProviders() {
   if (providersLoading.value || providersLoaded.value) return;
   providersLoading.value = true;
@@ -2714,7 +2743,10 @@ async function fetchProviders() {
       nextThinkingOptions.length === thinkingOptions.value.length &&
       nextThinkingOptions.every((value, index) => value === thinkingOptions.value[index]);
     if (!sameThinking) thinkingOptions.value = nextThinkingOptions;
-    if (selectedThinking.value === undefined || !nextThinkingOptions.includes(selectedThinking.value)) {
+    if (
+      selectedThinking.value === undefined ||
+      !nextThinkingOptions.includes(selectedThinking.value)
+    ) {
       selectedThinking.value = thinkingOptions.value[0];
       log('providers thinking set', selectedThinking.value);
     }
@@ -2739,7 +2771,9 @@ async function fetchAgents() {
       .filter((agent) => !agent.hidden)
       .map((agent) => ({
         id: agent.name,
-        label: agent.name ? `${agent.name.charAt(0).toUpperCase()}${agent.name.slice(1)}` : agent.name,
+        label: agent.name
+          ? `${agent.name.charAt(0).toUpperCase()}${agent.name.slice(1)}`
+          : agent.name,
         description: agent.description,
         color: agent.color,
       }));
@@ -2784,10 +2818,10 @@ async function fetchSessionStatus(directory?: string) {
   const requestId = ++sessionStatusRequestId;
   const directoryAtRequest = directory ?? '';
   try {
-    const data = (await opencodeApi.getSessionStatusMap(
-      OPENCODE_BASE_URL,
-      directory,
-    )) as Record<string, { type?: string }>;
+    const data = (await opencodeApi.getSessionStatusMap(OPENCODE_BASE_URL, directory)) as Record<
+      string,
+      { type?: string }
+    >;
     if (requestId !== sessionStatusRequestId) return;
     if (directoryAtRequest !== (activeDirectory.value || '')) return;
     const nextEntries: [string, SessionStatusType][] = [];
@@ -2948,10 +2982,14 @@ function parseMessageTokens(value: unknown): MessageTokens | null {
   const input = typeof record.input === 'number' ? record.input : 0;
   const output = typeof record.output === 'number' ? record.output : 0;
   const reasoning = typeof record.reasoning === 'number' ? record.reasoning : 0;
-  const cache = record.cache && typeof record.cache === 'object' ? (record.cache as Record<string, unknown>) : null;
+  const cache =
+    record.cache && typeof record.cache === 'object'
+      ? (record.cache as Record<string, unknown>)
+      : null;
   const cacheRead = cache && typeof cache.read === 'number' ? cache.read : 0;
   const cacheWrite = cache && typeof cache.write === 'number' ? cache.write : 0;
-  if (!Number.isFinite(input) && !Number.isFinite(output) && !Number.isFinite(reasoning)) return null;
+  if (!Number.isFinite(input) && !Number.isFinite(output) && !Number.isFinite(reasoning))
+    return null;
   return {
     input: Number.isFinite(input) ? input : 0,
     output: Number.isFinite(output) ? output : 0,
@@ -3105,7 +3143,11 @@ function resolveUserMessageDisplay(meta: UserMessageMeta | null): UserMessageDis
   };
 }
 
-function applyMessageUsageToQueue(messageId: string, sessionId: string | undefined, usage: MessageUsage) {
+function applyMessageUsageToQueue(
+  messageId: string,
+  sessionId: string | undefined,
+  usage: MessageUsage,
+) {
   const messageKey = sessionId ? buildMessageKey(messageId, sessionId) : undefined;
   if (messageKey) messageUsageByKey.set(messageKey, usage);
   const index = messageKey ? messageIndexById.get(messageKey) : undefined;
@@ -3114,11 +3156,14 @@ function applyMessageUsageToQueue(messageId: string, sessionId: string | undefin
     if (!existing || !existing.isMessage || !existing.isRound) return false;
     if (sessionId && existing.sessionId && existing.sessionId !== sessionId) return false;
     const existingRoundMessages = existing.roundMessages ?? [];
-    const roundMessageIndex = existingRoundMessages.findIndex((entry) => entry.messageId === messageId);
+    const roundMessageIndex = existingRoundMessages.findIndex(
+      (entry) => entry.messageId === messageId,
+    );
     if (roundMessageIndex < 0) return false;
     const currentRoundMessage = existingRoundMessages[roundMessageIndex];
     if (!currentRoundMessage) return false;
-    const providerId = usage.providerId ?? currentRoundMessage.providerId ?? existing.messageProviderId;
+    const providerId =
+      usage.providerId ?? currentRoundMessage.providerId ?? existing.messageProviderId;
     const modelId = usage.modelId ?? currentRoundMessage.modelId ?? existing.messageModelId;
     const contextPercent =
       usage.contextPercent ?? computeContextPercent(usage.tokens, providerId, modelId);
@@ -3139,7 +3184,8 @@ function applyMessageUsageToQueue(messageId: string, sessionId: string | undefin
       ...existing,
       messageProviderId:
         existing.messageId === messageId ? (providerId ?? undefined) : existing.messageProviderId,
-      messageModelId: existing.messageId === messageId ? (modelId ?? undefined) : existing.messageModelId,
+      messageModelId:
+        existing.messageId === messageId ? (modelId ?? undefined) : existing.messageModelId,
       messageUsage:
         existing.messageId === messageId
           ? {
@@ -3262,12 +3308,14 @@ function applyUserMessageMetaToQueue(messageId: string, meta: UserMessageMeta) {
   queue.value.forEach((entry, index) => {
     const matchesReasoningMessage = Boolean(
       entry.isReasoning &&
-        activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
+      activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
     );
     if (!entry.isMessage) return;
     if (entry.isRound && entry.roundMessages) {
       const existingRoundMessages = entry.roundMessages;
-      const roundMessageIndex = existingRoundMessages.findIndex((roundEntry) => roundEntry.messageId === messageId);
+      const roundMessageIndex = existingRoundMessages.findIndex(
+        (roundEntry) => roundEntry.messageId === messageId,
+      );
       if (roundMessageIndex >= 0) {
         const roundMessage = existingRoundMessages[roundMessageIndex];
         if (!roundMessage) return;
@@ -3280,10 +3328,18 @@ function applyUserMessageMetaToQueue(messageId: string, meta: UserMessageMeta) {
         });
         queue.value.splice(index, 1, {
           ...entry,
-          messageAgent: entry.messageId === messageId ? (displayMeta.agent ?? entry.messageAgent) : entry.messageAgent,
-          messageModel: entry.messageId === messageId ? (displayMeta.model ?? entry.messageModel) : entry.messageModel,
+          messageAgent:
+            entry.messageId === messageId
+              ? (displayMeta.agent ?? entry.messageAgent)
+              : entry.messageAgent,
+          messageModel:
+            entry.messageId === messageId
+              ? (displayMeta.model ?? entry.messageModel)
+              : entry.messageModel,
           messageVariant:
-            entry.messageId === messageId ? (displayMeta.variant ?? entry.messageVariant) : entry.messageVariant,
+            entry.messageId === messageId
+              ? (displayMeta.variant ?? entry.messageVariant)
+              : entry.messageVariant,
           roundMessages: nextRoundMessages,
         });
         return;
@@ -3303,12 +3359,14 @@ function applyUserMessageTimeToQueue(messageId: string, messageTime: number) {
   queue.value.forEach((entry, index) => {
     const matchesReasoningMessage = Boolean(
       entry.isReasoning &&
-        activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
+      activeReasoningMessageIdByKey.get(getReasoningKey(entry.sessionId)) === messageId,
     );
     if (!entry.isMessage) return;
     if (entry.isRound && entry.roundMessages) {
       const existingRoundMessages = entry.roundMessages;
-      const roundMessageIndex = existingRoundMessages.findIndex((roundEntry) => roundEntry.messageId === messageId);
+      const roundMessageIndex = existingRoundMessages.findIndex(
+        (roundEntry) => roundEntry.messageId === messageId,
+      );
       if (roundMessageIndex >= 0) {
         const roundMessage = existingRoundMessages[roundMessageIndex];
         if (!roundMessage) return;
@@ -3333,7 +3391,9 @@ function applyUserMessageTimeToQueue(messageId: string, messageTime: number) {
   });
 }
 
-function pickLastUserSelection(messages: Array<Record<string, unknown>>): UserMessageSelection | null {
+function pickLastUserSelection(
+  messages: Array<Record<string, unknown>>,
+): UserMessageSelection | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const entry = messages[i];
     const info = (entry?.info as Record<string, unknown> | undefined) ?? undefined;
@@ -3367,11 +3427,9 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
   const requestedDirectory = !isSubagentMessage ? getSelectedWorktreeDirectory() : '';
   try {
     const directory = getSelectedWorktreeDirectory();
-    const data = (await opencodeApi.listSessionMessages(
-      OPENCODE_BASE_URL,
-      sessionId,
-      { directory: directory || undefined },
-    )) as Array<Record<string, unknown>>;
+    const data = (await opencodeApi.listSessionMessages(OPENCODE_BASE_URL, sessionId, {
+      directory: directory || undefined,
+    })) as Array<Record<string, unknown>>;
     if (!Array.isArray(data)) return;
     if (!isSubagentMessage) {
       if (requestId !== primaryHistoryRequestId) return;
@@ -3396,10 +3454,10 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
       const parts = message.parts as unknown;
       const id = typeof info?.id === 'string' ? info.id : undefined;
       const role = typeof info?.role === 'string' ? info.role : undefined;
-       if (id && role === 'assistant' && Array.isArray(parts)) {
-         extractMessageDiffsFromParts(parts, id, sessionId);
-       }
-     });
+      if (id && role === 'assistant' && Array.isArray(parts)) {
+        extractMessageDiffsFromParts(parts, id, sessionId);
+      }
+    });
 
     const history = data
       .map((message, sourceIndex) => {
@@ -3415,7 +3473,7 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         const usage = resolveMessageUsageFromInfo(info);
         const messageTime = extractMessageTime(info);
         if (!id) return null;
-        if (!parentID && (!text.trim() && attachments.length === 0)) {
+        if (!parentID && !text.trim() && attachments.length === 0) {
           return {
             id,
             role,
@@ -3447,7 +3505,9 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         };
       })
       .filter(
-        (entry): entry is {
+        (
+          entry,
+        ): entry is {
           id: string;
           role?: string;
           parentID?: string;
@@ -3461,13 +3521,16 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
           sourceIndex: number;
         } => Boolean(entry),
       );
-    const historyMeta = new Map<string, {
-      displayMeta: ReturnType<typeof resolveUserMessageDisplay>;
-      resolvedTime?: number;
-      usageProviderId?: string;
-      usageModelId?: string;
-      historyUsage?: MessageUsage;
-    }>();
+    const historyMeta = new Map<
+      string,
+      {
+        displayMeta: ReturnType<typeof resolveUserMessageDisplay>;
+        resolvedTime?: number;
+        usageProviderId?: string;
+        usageModelId?: string;
+        historyUsage?: MessageUsage;
+      }
+    >();
 
     history.forEach((entry) => {
       storeUserMessageMeta(entry.id, entry.meta);
@@ -3558,8 +3621,8 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
     }
 
     // Build round groups
-    const roundRoots = new Map<string, typeof history[0]>();
-    const roundChildren = new Map<string, Array<typeof history[0]>>();
+    const roundRoots = new Map<string, (typeof history)[0]>();
+    const roundChildren = new Map<string, Array<(typeof history)[0]>>();
     for (const entry of history) {
       if (!entry.parentID) {
         roundRoots.set(entry.id, entry);
@@ -3605,7 +3668,8 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
       const roundDiffs = root.role === 'user' ? extractSummaryDiffs(root.info) : [];
       // Extract error from the last assistant message in the round (e.g. MessageAbortedError)
       const lastAssistantItem = [...roundItems].reverse().find((item) => item.role !== 'user');
-      const roundError = extractMessageError(lastAssistantItem?.info) ?? extractMessageError(root.info);
+      const roundError =
+        extractMessageError(lastAssistantItem?.info) ?? extractMessageError(root.info);
 
       queue.value.push({
         time,
@@ -3625,12 +3689,12 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
         scroll: false,
         scrollDistance: 0,
         scrollDuration: 0,
-         html: '',
-         attachments: root.attachments,
-         isWrite: false,
-         isMessage: true,
-         isSubagentMessage: false,
-         isRound: true,
+        html: '',
+        attachments: root.attachments,
+        isWrite: false,
+        isMessage: true,
+        isSubagentMessage: false,
+        isRound: true,
         roundId: root.id,
         roundMessages,
         roundDiffs,
@@ -3665,7 +3729,8 @@ function parsePtyInfo(value: unknown): PtyInfo | null {
   const command = typeof record.command === 'string' ? record.command : '';
   const args = Array.isArray(record.args) ? record.args.map((arg) => String(arg)) : [];
   const cwd = typeof record.cwd === 'string' ? record.cwd : '';
-  const status = record.status === 'running' || record.status === 'exited' ? record.status : 'running';
+  const status =
+    record.status === 'running' || record.status === 'exited' ? record.status : 'running';
   const pid = typeof record.pid === 'number' ? record.pid : 0;
   if (!id) return null;
   return { id, title, command, args, cwd, status, pid };
@@ -4011,7 +4076,7 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
     '    <footer',
     '      ref="inputEl"',
     '      class="app-input"',
-    '      :style="inputHeight !== null ? { height: \`${inputHeight}px\` } : undefined"',
+    '      :style="inputHeight !== null ? { height: `${inputHeight}px` } : undefined"',
     '    >',
     '      <div class="input-resizer" @pointerdown="startInputResize"></div>',
     '      <InputPanel',
@@ -4070,7 +4135,7 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
         '   html: string;',
         "-  variant?: 'code' | 'diff' | 'message' | 'binary';",
         "+  variant?: 'code' | 'diff' | 'message' | 'binary' | 'log';",
-        "+  maxHeight?: string;",
+        '+  maxHeight?: string;',
         "   wrapMode?: 'default' | 'soft';",
         "   gutterMode?: 'none' | 'single' | 'double';",
         ' }>();',
@@ -4083,7 +4148,7 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
         "   'wrap-soft': props.wrapMode === 'soft',",
         "   'no-gutter': props.gutterMode === 'none',",
         ' }));',
-        ' <\/script>',
+        ' </' + 'script>',
         ' ',
         ' <style scoped>',
         ' .code-content {',
@@ -4172,7 +4237,13 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       };
       return [
         { status: 'running', input: patchInput, metadata: patchMeta, output: patchDiff },
-        { status: 'completed', delayMs: 550, input: patchInput, metadata: patchMeta, output: 'Success. Updated the following files:\nM app/components/CodeContent.vue' },
+        {
+          status: 'completed',
+          delayMs: 550,
+          input: patchInput,
+          metadata: patchMeta,
+          output: 'Success. Updated the following files:\nM app/components/CodeContent.vue',
+        },
       ];
     }
     case 'bash': {
@@ -4417,20 +4488,26 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
         '   );',
         ' ',
         '@@ -194,8 +196,12 @@',
-        '   const isDiff = computed(() => entry.value.view === \'diff\' && !!entry.value.content);',
+        "   const isDiff = computed(() => entry.value.view === 'diff' && !!entry.value.content);",
         ' ',
         "-  const contentVariant = computed<'code' | 'diff' | 'message'>(() => {",
         "+  const contentVariant = computed<'code' | 'diff' | 'message' | 'log'>(() => {",
-        '     if (isDiff.value) return \'diff\';',
-        '     if (entry.value.isMessage) return \'message\';',
+        "     if (isDiff.value) return 'diff';",
+        "     if (entry.value.isMessage) return 'message';",
         "+    if (entry.value.toolName === 'bash') return 'log';",
-        '     return \'code\';',
+        "     return 'code';",
         '   });',
       ].join('\n');
       const editMeta = { diff: editDiff };
       return [
         { status: 'running', input: editInput, metadata: editMeta, output: editDiff },
-        { status: 'completed', delayMs: 420, input: editInput, metadata: editMeta, output: 'Applied edit' },
+        {
+          status: 'completed',
+          delayMs: 420,
+          input: editInput,
+          metadata: editMeta,
+          output: 'Applied edit',
+        },
       ];
     }
     case 'glob': {
@@ -4471,7 +4548,11 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       ];
     }
     case 'grep': {
-      const grepInput = { pattern: 'useCodeRender|renderWorkerHtml|CodeRenderParams', path: `${basePath}/app`, include: '*.{vue,ts}' };
+      const grepInput = {
+        pattern: 'useCodeRender|renderWorkerHtml|CodeRenderParams',
+        path: `${basePath}/app`,
+        include: '*.{vue,ts}',
+      };
       const grepOutput = [
         `Found 18 matches in 7 files`,
         ``,
@@ -4567,8 +4648,14 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       const multiEditInput = {
         filePath: `${basePath.replace(/\/+$/, '')}/app/components/FileViewerWindow.vue`,
         edits: [
-          { oldString: "import { computed, ref } from 'vue';", newString: "import { computed, ref, watch } from 'vue';" },
-          { oldString: 'const entry = computed(() => props.entry);', newString: 'const entry = computed(() => props.entry);\nconst isActive = ref(false);' },
+          {
+            oldString: "import { computed, ref } from 'vue';",
+            newString: "import { computed, ref, watch } from 'vue';",
+          },
+          {
+            oldString: 'const entry = computed(() => props.entry);',
+            newString: 'const entry = computed(() => props.entry);\nconst isActive = ref(false);',
+          },
         ],
       };
       const multiDiff1 = [
@@ -4676,7 +4763,13 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       const multiMeta = { results: [{ diff: multiDiff1 }, { diff: multiDiff2 }] };
       return [
         { status: 'running', input: multiEditInput, output: 'Applying 2 edits...' },
-        { status: 'completed', delayMs: 430, input: multiEditInput, metadata: multiMeta, output: 'Applied 2 edits' },
+        {
+          status: 'completed',
+          delayMs: 430,
+          input: multiEditInput,
+          metadata: multiMeta,
+          output: 'Applied 2 edits',
+        },
       ];
     }
     case 'plan_enter':
@@ -4749,7 +4842,11 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
       ];
     }
     case 'webfetch': {
-      const webfetchInput = { url: 'https://opencode.ai/docs/server/', format: 'markdown', timeout: 30 };
+      const webfetchInput = {
+        url: 'https://opencode.ai/docs/server/',
+        format: 'markdown',
+        timeout: 30,
+      };
       const webfetchOutput = [
         '# OpenCode Server API Reference',
         '',
@@ -4921,7 +5018,7 @@ function buildDebugToolEvents(tool: string): DebugToolEvent[] | null {
         '### 1. Vue.js Official Documentation — Composables',
         '**Source:** https://vuejs.org/guide/reusability/composables.html',
         '',
-        'A composable is a function that leverages Vue\'s Composition API to encapsulate',
+        "A composable is a function that leverages Vue's Composition API to encapsulate",
         'and reuse stateful logic. Composables should:',
         '',
         '- Follow the `use` prefix naming convention (e.g., `useMouse`, `useFetch`)',
@@ -5184,9 +5281,7 @@ async function sendMessage() {
   const hasAttachments = attachments.value.length > 0;
   let sessionId = selectedSessionId.value;
   if ((!hasText && !hasAttachments) || !sessionId) return;
-  if (
-    !filteredSessions.value.some((session) => session.id === sessionId)
-  ) {
+  if (!filteredSessions.value.some((session) => session.id === sessionId)) {
     const fallbackId = pickPreferredSessionId(filteredSessions.value);
     const fallback = fallbackId
       ? filteredSessions.value.find((session) => session.id === fallbackId)
@@ -5320,7 +5415,6 @@ watch(
   { immediate: true },
 );
 
-
 watch(
   selectedWorktreeDir,
   (value, previous) => {
@@ -5445,7 +5539,10 @@ watch(selectedModel, () => {
     nextThinkingOptions.length === thinkingOptions.value.length &&
     nextThinkingOptions.every((value, index) => value === thinkingOptions.value[index]);
   if (!sameThinking) thinkingOptions.value = nextThinkingOptions;
-  if (selectedThinking.value === undefined || !nextThinkingOptions.includes(selectedThinking.value)) {
+  if (
+    selectedThinking.value === undefined ||
+    !nextThinkingOptions.includes(selectedThinking.value)
+  ) {
     selectedThinking.value = nextThinkingOptions[0];
   }
 });
@@ -5483,8 +5580,7 @@ watch(
   { immediate: true },
 );
 
-function log(..._args: unknown[]) {
-}
+function log(..._args: unknown[]) {}
 
 const shikiTheme = ref('github-dark');
 setInterval(() => {
@@ -5713,7 +5809,10 @@ function extractToolOutputText(output: unknown) {
   return formatToolValue(output);
 }
 
-function parsePermissionRequest(value: unknown, fallbackSessionId?: string): PermissionRequest | null {
+function parsePermissionRequest(
+  value: unknown,
+  fallbackSessionId?: string,
+): PermissionRequest | null {
   if (!value || typeof value !== 'object') return null;
   const record = value as Record<string, unknown>;
   const id =
@@ -5751,7 +5850,9 @@ function parsePermissionRequest(value: unknown, fallbackSessionId?: string): Per
       ? (record.metadata as Record<string, unknown>)
       : {};
   const toolRaw =
-    record.tool && typeof record.tool === 'object' ? (record.tool as Record<string, unknown>) : null;
+    record.tool && typeof record.tool === 'object'
+      ? (record.tool as Record<string, unknown>)
+      : null;
   const toolMessageId =
     (typeof record.messageID === 'string' && record.messageID) ||
     (toolRaw && typeof toolRaw.messageID === 'string' ? toolRaw.messageID : undefined);
@@ -5760,7 +5861,8 @@ function parsePermissionRequest(value: unknown, fallbackSessionId?: string): Per
     (typeof record.callId === 'string' && record.callId) ||
     (toolRaw && typeof toolRaw.callID === 'string' ? toolRaw.callID : undefined);
   if (!id || !sessionID || !permission) return null;
-  const tool = toolMessageId && toolCallId ? { messageID: toolMessageId, callID: toolCallId } : undefined;
+  const tool =
+    toolMessageId && toolCallId ? { messageID: toolMessageId, callID: toolCallId } : undefined;
   return {
     id,
     sessionID,
@@ -5820,7 +5922,9 @@ function parseQuestionRequest(value: unknown, fallbackSessionId?: string): Quest
     })
     .filter((entry): entry is QuestionInfo => Boolean(entry));
   const toolRaw =
-    record.tool && typeof record.tool === 'object' ? (record.tool as Record<string, unknown>) : null;
+    record.tool && typeof record.tool === 'object'
+      ? (record.tool as Record<string, unknown>)
+      : null;
   const toolMessageId =
     (typeof record.messageID === 'string' && record.messageID) ||
     (toolRaw && typeof toolRaw.messageID === 'string' ? toolRaw.messageID : undefined);
@@ -5829,7 +5933,8 @@ function parseQuestionRequest(value: unknown, fallbackSessionId?: string): Quest
     (typeof record.callId === 'string' && record.callId) ||
     (toolRaw && typeof toolRaw.callID === 'string' ? toolRaw.callID : undefined);
   if (!id || !sessionID || questions.length === 0) return null;
-  const tool = toolMessageId && toolCallId ? { messageID: toolMessageId, callID: toolCallId } : undefined;
+  const tool =
+    toolMessageId && toolCallId ? { messageID: toolMessageId, callID: toolCallId } : undefined;
   return {
     id,
     sessionID,
@@ -5973,22 +6078,25 @@ function isReadWithOffset(entry: { toolName?: string; readOffset?: number }) {
   return entry.toolName === 'read' && typeof entry.readOffset === 'number' && entry.readOffset > 0;
 }
 
-async function hydrateAndPopupRead(entry: {
-  content: string;
-  path?: string;
-  isWrite: boolean;
-  callId?: string;
-  toolStatus?: string;
-  toolName?: string;
-  toolTitle?: string;
-  lang?: string;
-  grepPattern?: string;
-  wrapMode?: FileReadEntry['toolWrapMode'];
-  gutterMode?: FileReadEntry['toolGutterMode'];
-  gutterLines?: string[];
-  readOffset?: number;
-  readLimit?: number;
-}, eventType: string) {
+async function hydrateAndPopupRead(
+  entry: {
+    content: string;
+    path?: string;
+    isWrite: boolean;
+    callId?: string;
+    toolStatus?: string;
+    toolName?: string;
+    toolTitle?: string;
+    lang?: string;
+    grepPattern?: string;
+    wrapMode?: FileReadEntry['toolWrapMode'];
+    gutterMode?: FileReadEntry['toolGutterMode'];
+    gutterLines?: string[];
+    readOffset?: number;
+    readLimit?: number;
+  },
+  eventType: string,
+) {
   if (!entry.callId || !entry.path) return;
   if (typeof entry.readOffset !== 'number' || entry.readOffset <= 0) return;
 
@@ -6031,11 +6139,14 @@ async function hydrateAndPopupRead(entry: {
     const rawContent = typeof data?.content === 'string' ? data.content : '';
     const fullCode = encoding === 'base64' ? atob(rawContent) : rawContent;
 
-    upsertToolEntry({
-      ...entry,
-      content: fullCode,
-      toolStatus: 'completed',
-    }, eventType);
+    upsertToolEntry(
+      {
+        ...entry,
+        content: fullCode,
+        toolStatus: 'completed',
+      },
+      eventType,
+    );
   } catch {
     return;
   }
@@ -6060,7 +6171,6 @@ function formatTaskToolOutput(output: string) {
   if (parts.length > 0) return parts.join('\n\n');
   return output;
 }
-
 
 function formatBashToolContent(
   input: Record<string, unknown> | undefined,
@@ -6174,7 +6284,9 @@ function normalizeTodoItem(value: unknown): TodoItem | null {
 
 function normalizeTodoItems(value: unknown) {
   if (!Array.isArray(value)) return [] as TodoItem[];
-  return value.map((item) => normalizeTodoItem(item)).filter((item): item is TodoItem => Boolean(item));
+  return value
+    .map((item) => normalizeTodoItem(item))
+    .filter((item): item is TodoItem => Boolean(item));
 }
 
 async function reloadTodosForAllowedSessions() {
@@ -6228,7 +6340,8 @@ function toRelativePath(path: string, directory: string) {
   const normalizedPath = normalizeDirectory(path);
   if (normalizedPath === normalizedDirectory) return '.';
   const prefix = `${normalizedDirectory}/`;
-  if (normalizedPath.startsWith(prefix)) return normalizeRelativePath(normalizedPath.slice(prefix.length));
+  if (normalizedPath.startsWith(prefix))
+    return normalizeRelativePath(normalizedPath.slice(prefix.length));
   return normalizeRelativePath(normalizedPath);
 }
 
@@ -6289,7 +6402,7 @@ function buildTreeNodes(items: unknown[], directory: string, parentPath: string)
     unique.set(path, {
       name,
       path,
-      type: isLeaf ? node.type ?? 'file' : 'directory',
+      type: isLeaf ? (node.type ?? 'file') : 'directory',
       children: isLeaf && node.type !== 'directory' ? undefined : [],
       loaded: false,
       ignored: Boolean(node.ignored),
@@ -6299,7 +6412,11 @@ function buildTreeNodes(items: unknown[], directory: string, parentPath: string)
   return sortTreeNodes(Array.from(unique.values()));
 }
 
-function updateTreeNodeChildren(nodes: TreeNode[], targetPath: string, children: TreeNode[]): TreeNode[] {
+function updateTreeNodeChildren(
+  nodes: TreeNode[],
+  targetPath: string,
+  children: TreeNode[],
+): TreeNode[] {
   return nodes.map((node) => {
     if (node.path === targetPath) {
       return {
@@ -6488,8 +6605,20 @@ function openSessionDiff(path: string) {
     return;
   }
   const metrics = getCanvasMetrics();
-  const x = metrics ? clamp(metrics.canvasRect.width * 0.16, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 24;
-  const y = metrics ? clamp(metrics.toolAreaHeight * 0.1, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 24;
+  const x = metrics
+    ? clamp(
+        metrics.canvasRect.width * 0.16,
+        16,
+        Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16),
+      )
+    : 24;
+  const y = metrics
+    ? clamp(
+        metrics.toolAreaHeight * 0.1,
+        16,
+        Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16),
+      )
+    : 24;
   const diffEntry: FileReadEntry = {
     time: Date.now(),
     expiresAt: Number.MAX_SAFE_INTEGER,
@@ -6531,15 +6660,29 @@ function handleShowMessageDiff(payload: { messageKey: string; diffs: Array<Messa
     return;
   }
   // If diffs have before/after (from summary.diffs), use them for rich diff view
-  const hasBeforeAfter = diffs.some((d) => typeof d.before === 'string' && typeof d.after === 'string');
+  const hasBeforeAfter = diffs.some(
+    (d) => typeof d.before === 'string' && typeof d.after === 'string',
+  );
   const combinedDiff = hasBeforeAfter ? '' : diffs.map((d) => d.diff).join('\n');
   const metrics = getCanvasMetrics();
-  const x = metrics ? clamp(metrics.canvasRect.width * 0.16, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 24;
-  const y = metrics ? clamp(metrics.toolAreaHeight * 0.1, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 24;
+  const x = metrics
+    ? clamp(
+        metrics.canvasRect.width * 0.16,
+        16,
+        Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16),
+      )
+    : 24;
+  const y = metrics
+    ? clamp(
+        metrics.toolAreaHeight * 0.1,
+        16,
+        Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16),
+      )
+    : 24;
   const fileCount = diffs.length;
   const title = fileCount === 1 ? diffs[0].file : `${fileCount} files changed`;
   const firstFile = diffs[0]?.file ?? '';
-  
+
   let diffTabs: Array<{ file: string; before: string; after: string }> | undefined;
   if (hasBeforeAfter && fileCount > 1) {
     diffTabs = diffs
@@ -6594,8 +6737,20 @@ function handleShowMessageHistory(payload: { roundId: string; contents: string[]
   }
   const combinedMarkdown = contents.join('\n\n---\n\n');
   const metrics = getCanvasMetrics();
-  const x = metrics ? clamp(metrics.canvasRect.width * 0.16, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 24;
-  const y = metrics ? clamp(metrics.toolAreaHeight * 0.1, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 24;
+  const x = metrics
+    ? clamp(
+        metrics.canvasRect.width * 0.16,
+        16,
+        Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16),
+      )
+    : 24;
+  const y = metrics
+    ? clamp(
+        metrics.toolAreaHeight * 0.1,
+        16,
+        Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16),
+      )
+    : 24;
   const historyEntry: FileReadEntry = {
     time: Date.now(),
     expiresAt: Number.MAX_SAFE_INTEGER,
@@ -6630,8 +6785,20 @@ async function openFileViewer(path: string) {
     return;
   }
   const metrics = getCanvasMetrics();
-  const x = metrics ? clamp(metrics.canvasRect.width * 0.18, 16, Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16)) : 32;
-  const y = metrics ? clamp(metrics.toolAreaHeight * 0.14, 16, Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16)) : 32;
+  const x = metrics
+    ? clamp(
+        metrics.canvasRect.width * 0.18,
+        16,
+        Math.max(16, metrics.canvasRect.width - FILE_VIEWER_WINDOW_WIDTH - 16),
+      )
+    : 32;
+  const y = metrics
+    ? clamp(
+        metrics.toolAreaHeight * 0.14,
+        16,
+        Math.max(16, metrics.toolAreaHeight - FILE_VIEWER_WINDOW_HEIGHT - 16),
+      )
+    : 32;
   const entry: FileReadEntry = {
     time: Date.now(),
     expiresAt: Number.MAX_SAFE_INTEGER,
@@ -6686,7 +6853,8 @@ async function openFileViewer(path: string) {
         viewerEntry.isLoading = false;
         return;
       }
-      const bytes = encoding === 'base64' ? toUint8ArrayFromBase64(content) : toUint8ArrayFromText(content);
+      const bytes =
+        encoding === 'base64' ? toUint8ArrayFromBase64(content) : toUint8ArrayFromText(content);
       const dump = hexdump(bytes, { color: 'html' });
       viewerEntry.html = `<pre class="shiki"><code>${dump}</code></pre>`;
       viewerEntry.toolGutterMode = 'none';
@@ -6800,7 +6968,6 @@ function detectDiffLike(content: string, path?: string) {
     /(^|\n)---\s/m.test(content)
   );
 }
-
 
 function countWrappedLines(text: string, columns: number) {
   if (columns <= 0) return text.split('\n').length;
@@ -6943,7 +7110,6 @@ function formatDiffEntries(entries: unknown[]) {
   return blocks.filter((block) => typeof block === 'string').join('\n\n');
 }
 
-
 function extractPatch(payload: unknown) {
   if (!payload || typeof payload !== 'object') return null;
   const record = payload as Record<string, unknown>;
@@ -6970,7 +7136,9 @@ function extractPatch(payload: unknown) {
     (properties?.part && typeof properties.part === 'object'
       ? (properties.part as Record<string, unknown>)
       : undefined) ??
-    (data?.part && typeof data.part === 'object' ? (data.part as Record<string, unknown>) : undefined) ??
+    (data?.part && typeof data.part === 'object'
+      ? (data.part as Record<string, unknown>)
+      : undefined) ??
     (record.part && typeof record.part === 'object'
       ? (record.part as Record<string, unknown>)
       : undefined) ??
@@ -7000,8 +7168,7 @@ function extractPatch(payload: unknown) {
     state?.metadata && typeof state.metadata === 'object'
       ? (state.metadata as Record<string, unknown>)
       : undefined;
-  const output =
-    state?.output ?? (state?.metadata as Record<string, unknown> | undefined)?.output;
+  const output = state?.output ?? (state?.metadata as Record<string, unknown> | undefined)?.output;
   const outputText = output !== undefined ? extractToolOutputText(output) : '';
   const stateError = state?.error;
   const errorText =
@@ -7052,9 +7219,7 @@ function extractPatch(payload: unknown) {
       const before = typeof record.before === 'string' ? record.before : undefined;
       const after = typeof record.after === 'string' ? record.after : undefined;
       if (before !== undefined || after !== undefined) {
-        const fileName =
-          relativePath ??
-          (parsedBlocks[index]?.path || `patch-${index + 1}`);
+        const fileName = relativePath ?? (parsedBlocks[index]?.path || `patch-${index + 1}`);
         return {
           path: fileName,
           content: buildUnifiedDiff(before ?? '', after ?? '', fileName, {
@@ -7329,9 +7494,7 @@ function extractFileRead(payload: unknown, eventType: string) {
     }
 
     if (!content.trim() && status === 'running') {
-      const allowEmptyRunning =
-        tool === 'list' ||
-        tool === 'task';
+      const allowEmptyRunning = tool === 'list' || tool === 'task';
       if (!allowEmptyRunning) return null;
     }
     if (!content.trim() && status !== 'running') content = errorText ?? outputText ?? '';
@@ -7487,9 +7650,7 @@ function extractMessageAttachments(payload: unknown) {
       ? (messageObject.part as Record<string, unknown>)
       : undefined);
   const parts =
-    (messageObject?.parts as unknown) ??
-    (data?.parts as unknown) ??
-    (record.parts as unknown);
+    (messageObject?.parts as unknown) ?? (data?.parts as unknown) ?? (record.parts as unknown);
 
   const attachments = normalizeAttachments([
     ...extractImageAttachmentsFromParts(parts),
@@ -7554,7 +7715,7 @@ function classifyUserMessage(
   userMeta: UserMessageMeta | null,
 ): 'real_user' | 'system_injection' | 'unknown' {
   if (role !== 'user') return 'unknown';
-  
+
   // 1. If we have explicit user metadata (agent/model config), it's likely a real user request
   // (or a very sophisticated injection simulating a user config, but we treat that as user-initiated).
   if (userMeta) return 'real_user';
@@ -7564,7 +7725,7 @@ function classifyUserMessage(
   const recentMatch = recentUserInputs.find((entry) => entry.text === normalized);
   if (recentMatch) return 'real_user';
 
-  // 3. Fallback: If we can't confirm it's a real user, and it has no meta, 
+  // 3. Fallback: If we can't confirm it's a real user, and it has no meta,
   // we classify as unknown (or system_injection if we had a negative signal).
   // The prompt says "If real-user vs injected cannot be determined, classify as unknown".
   return 'unknown';
@@ -7589,13 +7750,12 @@ function extractPartType(payload: unknown, eventType: string) {
       ? (properties.part as Record<string, unknown>)
       : undefined;
   const partType = typeof part?.type === 'string' ? part.type : undefined;
-  
+
   if (!partType) return null;
 
   const messageId =
-    (part?.messageID as string | undefined) ??
-    (properties?.messageId as string | undefined);
-  
+    (part?.messageID as string | undefined) ?? (properties?.messageId as string | undefined);
+
   const sessionId =
     (typeof part?.sessionID === 'string' ? (part.sessionID as string) : undefined) ??
     extractSessionId(payload);
@@ -7773,7 +7933,9 @@ function extractMessageFinish(payload: unknown, eventType: string) {
     (properties?.info && typeof properties.info === 'object'
       ? (properties.info as Record<string, unknown>)
       : undefined) ??
-    (record.info && typeof record.info === 'object' ? (record.info as Record<string, unknown>) : undefined);
+    (record.info && typeof record.info === 'object'
+      ? (record.info as Record<string, unknown>)
+      : undefined);
   const type =
     (record.type as string | undefined) ??
     (record.event as string | undefined) ??
@@ -7797,26 +7959,36 @@ function extractMessageFinish(payload: unknown, eventType: string) {
       : typeof (info?.messageId as string | undefined) === 'string'
         ? (info.messageId as string)
         : undefined;
-  const parentID =
-    typeof info?.parentID === 'string' ? (info.parentID as string) : undefined;
+  const parentID = typeof info?.parentID === 'string' ? (info.parentID as string) : undefined;
   return { finish, sessionId, messageId, parentID, error };
 }
 
-function extractMessageError(info: Record<string, unknown> | undefined): { name: string; message: string } | null {
+function extractMessageError(
+  info: Record<string, unknown> | undefined,
+): { name: string; message: string } | null {
   const error = info?.error;
   if (!error || typeof error !== 'object') return null;
   const record = error as Record<string, unknown>;
   const name = typeof record.name === 'string' ? record.name : '';
-  const data = record.data && typeof record.data === 'object' ? (record.data as Record<string, unknown>) : undefined;
-  const message = typeof data?.message === 'string' ? data.message : (typeof record.message === 'string' ? record.message : '');
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const message =
+    typeof data?.message === 'string'
+      ? data.message
+      : typeof record.message === 'string'
+        ? record.message
+        : '';
   if (!name) return null;
   return { name, message };
 }
 
 function extractSummaryDiffs(info: Record<string, unknown> | undefined): Array<MessageDiffEntry> {
-  const summary = info?.summary && typeof info.summary === 'object'
-    ? (info.summary as Record<string, unknown>)
-    : undefined;
+  const summary =
+    info?.summary && typeof info.summary === 'object'
+      ? (info.summary as Record<string, unknown>)
+      : undefined;
   const diffs = Array.isArray(summary?.diffs) ? summary.diffs : [];
   const result: Array<MessageDiffEntry> = [];
   for (const d of diffs) {
@@ -7897,7 +8069,10 @@ function upsertPrimaryAssistantIntoRound(
     // New messageId — replace last assistant entry (fade transition)
     let lastAssistantIdx = -1;
     for (let i = nextRoundMessages.length - 1; i >= 0; i--) {
-      if (nextRoundMessages[i]?.role === 'assistant') { lastAssistantIdx = i; break; }
+      if (nextRoundMessages[i]?.role === 'assistant') {
+        lastAssistantIdx = i;
+        break;
+      }
     }
     if (lastAssistantIdx >= 0) {
       nextRoundMessages.splice(lastAssistantIdx, 1, roundMessage);
@@ -7950,7 +8125,8 @@ function promoteFinalAnswerToOutputPanel(
   const sessionWindowKey = buildMessageKey(sessionWindowId, resolvedSessionId);
   const finalMessageId = messageFinish.messageId ?? sessionWindowId;
   const finalMessageKey = buildMessageKey(finalMessageId, resolvedSessionId);
-  const content = messageContentById.get(finalMessageKey) ?? messageContentById.get(sessionWindowKey);
+  const content =
+    messageContentById.get(finalMessageKey) ?? messageContentById.get(sessionWindowKey);
   if (!content || !content.trim()) return;
 
   // Build a stable key for this final answer using the actual message ID
@@ -7959,7 +8135,8 @@ function promoteFinalAnswerToOutputPanel(
   const roundId = messageFinish.parentID ?? finalMessageId;
   const roundMessageKey = buildMessageKey(roundId, resolvedSessionId);
 
-  const existingUsage = messageUsageByKey.get(sessionWindowKey) ?? messageUsageByKey.get(finalMessageKey);
+  const existingUsage =
+    messageUsageByKey.get(sessionWindowKey) ?? messageUsageByKey.get(finalMessageKey);
   const time = Date.now();
   const header = '';
   const text = `${header}${content}`;
@@ -7971,7 +8148,8 @@ function promoteFinalAnswerToOutputPanel(
   const scrollDistance = Math.max(0, overflowLines * lineHeight);
   const scrollDuration =
     overflowLines > 0 ? Math.min(0.25, Math.max(0.08, overflowLines * 0.01)) : 0;
-  const attachments = messageAttachmentsById.get(sessionWindowKey) ?? messageAttachmentsById.get(finalMessageKey);
+  const attachments =
+    messageAttachmentsById.get(sessionWindowKey) ?? messageAttachmentsById.get(finalMessageKey);
 
   // Inherit agent/model display from an existing transient entry if it exists
   const sessionWindowIndex = messageIndexById.get(sessionWindowKey);
@@ -7996,10 +8174,7 @@ function promoteFinalAnswerToOutputPanel(
   };
 
   const targetRoundIndex = queue.value.findIndex(
-    (entry) =>
-      entry.isRound &&
-      entry.roundId === roundId &&
-      entry.sessionId === resolvedSessionId,
+    (entry) => entry.isRound && entry.roundId === roundId && entry.sessionId === resolvedSessionId,
   );
   if (targetRoundIndex >= 0) {
     const round = queue.value[targetRoundIndex];
@@ -8009,11 +8184,11 @@ function promoteFinalAnswerToOutputPanel(
       round.roundMessages = [...existingRoundMessages, newSubMessage];
       messageIndexById.set(finalMessageKey, targetRoundIndex);
       messageContentById.set(finalMessageKey, content);
-       if (existingUsage) messageUsageByKey.set(finalMessageKey, existingUsage);
-       if (attachments && attachments.length > 0) {
-         messageAttachmentsById.set(finalMessageKey, attachments);
-       }
-       scheduleFollowScroll();
+      if (existingUsage) messageUsageByKey.set(finalMessageKey, existingUsage);
+      if (attachments && attachments.length > 0) {
+        messageAttachmentsById.set(finalMessageKey, attachments);
+      }
+      scheduleFollowScroll();
       return;
     }
   }
@@ -8036,12 +8211,12 @@ function promoteFinalAnswerToOutputPanel(
     scroll: overflowLines > 0,
     scrollDistance,
     scrollDuration,
-     html: '',
-     attachments,
-     isWrite: false,
-     isMessage: true,
-     isSubagentMessage: false,
-     isRound: true,
+    html: '',
+    attachments,
+    isWrite: false,
+    isMessage: true,
+    isSubagentMessage: false,
+    isRound: true,
     roundId,
     roundMessages: [newSubMessage],
     roundDiffs: [],
@@ -8063,7 +8238,7 @@ function promoteFinalAnswerToOutputPanel(
     messageAttachmentsById.set(finalMessageKey, attachments);
   }
 
-   scheduleFollowScroll();
+  scheduleFollowScroll();
 }
 
 function formatRetryTime(timestamp: number): string {
@@ -8071,15 +8246,17 @@ function formatRetryTime(timestamp: number): string {
   const now = Date.now();
   const diffMs = timestamp - now;
 
-  const absolute = nextDate.toLocaleString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).replace(/(\d+)\/(\d+)\/(\d+),/, '$3/$1/$2');
+  const absolute = nextDate
+    .toLocaleString('en-US', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+    .replace(/(\d+)\/(\d+)\/(\d+),/, '$3/$1/$2');
 
   const diffSec = Math.max(0, Math.ceil(diffMs / 1000));
   const diffMin = Math.ceil(diffSec / 60);
@@ -8198,7 +8375,8 @@ function extractPtyEvent(payload: unknown, eventType: string) {
   if (!type) return null;
   const normalized = normalizeEventType(type);
   if (!normalized.startsWith('pty')) return null;
-  const infoRaw = properties?.info && typeof properties.info === 'object' ? properties.info : undefined;
+  const infoRaw =
+    properties?.info && typeof properties.info === 'object' ? properties.info : undefined;
   const info = parsePtyInfo(infoRaw);
   const id =
     (properties?.id as string | undefined) ??
@@ -8228,8 +8406,12 @@ function extractPermissionAsked(payload: unknown, eventType: string) {
       ? (record.properties as Record<string, unknown>)
       : undefined);
   const data =
-    (record.data && typeof record.data === 'object' ? (record.data as Record<string, unknown>) : undefined) ??
-    (record.result && typeof record.result === 'object' ? (record.result as Record<string, unknown>) : undefined);
+    (record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined) ??
+    (record.result && typeof record.result === 'object'
+      ? (record.result as Record<string, unknown>)
+      : undefined);
   const type =
     (record.type as string | undefined) ??
     (record.event as string | undefined) ??
@@ -8306,8 +8488,12 @@ function extractQuestionAsked(payload: unknown, eventType: string) {
       ? (record.properties as Record<string, unknown>)
       : undefined);
   const data =
-    (record.data && typeof record.data === 'object' ? (record.data as Record<string, unknown>) : undefined) ??
-    (record.result && typeof record.result === 'object' ? (record.result as Record<string, unknown>) : undefined);
+    (record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined) ??
+    (record.result && typeof record.result === 'object'
+      ? (record.result as Record<string, unknown>)
+      : undefined);
   const type =
     (record.type as string | undefined) ??
     (record.event as string | undefined) ??
@@ -8580,7 +8766,9 @@ function buildQuestionEntry(request: QuestionRequest): FileReadEntry {
 }
 
 function upsertQuestionEntry(request: QuestionRequest) {
-  const existingIndex = queue.value.findIndex((entry) => entry.isQuestion && entry.questionId === request.id);
+  const existingIndex = queue.value.findIndex(
+    (entry) => entry.isQuestion && entry.questionId === request.id,
+  );
   if (existingIndex >= 0) {
     const existing = queue.value[existingIndex];
     if (!existing) return;
@@ -8598,7 +8786,9 @@ function upsertQuestionEntry(request: QuestionRequest) {
 }
 
 function removeQuestionEntry(requestId: string) {
-  const existingIndex = queue.value.findIndex((entry) => entry.isQuestion && entry.questionId === requestId);
+  const existingIndex = queue.value.findIndex(
+    (entry) => entry.isQuestion && entry.questionId === requestId,
+  );
   if (existingIndex < 0) return;
   queue.value.splice(existingIndex, 1);
   clearQuestionSending(requestId);
@@ -8783,18 +8973,16 @@ function registerMessageSummary(payload: unknown) {
 
   if (id && summary) {
     const diffs = extractSummaryDiffs({ summary } as Record<string, unknown>);
-    const roundIndex = queue.value.findIndex(
-      (entry) => entry.isRound && entry.roundId === id,
-    );
-     if (roundIndex >= 0) {
-       const roundEntry = queue.value[roundIndex];
-       if (roundEntry) {
-         roundEntry.roundDiffs = diffs;
-         const messageKey = buildMessageKey(roundEntry.roundId ?? id, roundEntry.sessionId);
-         messageDiffsByKey.set(messageKey, diffs);
-       }
-       return;
-     }
+    const roundIndex = queue.value.findIndex((entry) => entry.isRound && entry.roundId === id);
+    if (roundIndex >= 0) {
+      const roundEntry = queue.value[roundIndex];
+      if (roundEntry) {
+        roundEntry.roundDiffs = diffs;
+        const messageKey = buildMessageKey(roundEntry.roundId ?? id, roundEntry.sessionId);
+        messageDiffsByKey.set(messageKey, diffs);
+      }
+      return;
+    }
   }
 }
 
@@ -8845,9 +9033,7 @@ function extractMessageDiffsFromParts(parts: unknown[], messageId: string, sessi
     const tool = typeof p.tool === 'string' ? p.tool : '';
     registerPartType(messageKey, 'tool');
     const state =
-      p.state && typeof p.state === 'object'
-        ? (p.state as Record<string, unknown>)
-        : undefined;
+      p.state && typeof p.state === 'object' ? (p.state as Record<string, unknown>) : undefined;
     if (!state) return;
     const metadata =
       state.metadata && typeof state.metadata === 'object'
@@ -8898,8 +9084,7 @@ function registerMessageDiff(payload: unknown) {
       ? (state.input as Record<string, unknown>)
       : undefined;
   const messageId =
-    (part.messageID as string | undefined) ??
-    (part.messageId as string | undefined);
+    (part.messageID as string | undefined) ?? (part.messageId as string | undefined);
   const sessionId =
     (typeof part.sessionID === 'string' ? (part.sessionID as string) : undefined) ??
     extractSessionId(payload);
@@ -9057,13 +9242,14 @@ function upsertToolEntry(
   const isBashTool = entry.toolName === 'bash';
   const displayPath = resolveWorktreeRelativePath(entry.path);
   const hideHeader = Boolean(entry.toolName);
-  const header = isBashTool || hideHeader
-    ? ''
-    : displayPath
-      ? `# ${displayPath}\n\n`
-      : eventType !== 'message'
-        ? `# ${eventType}\n\n`
-        : '';
+  const header =
+    isBashTool || hideHeader
+      ? ''
+      : displayPath
+        ? `# ${displayPath}\n\n`
+        : eventType !== 'message'
+          ? `# ${eventType}\n\n`
+          : '';
   const time = Date.now();
   const scrollDistance = 0;
   const scrollDuration = 0;
@@ -9078,29 +9264,27 @@ function upsertToolEntry(
     if (existingIndex !== undefined) {
       const existing = queue.value[existingIndex];
       if (existing) {
-         // Lightweight status-only update: when the incoming event carries no
-         // new visual content we just patch metadata in-place to avoid a full
-         // reactive splice (which would re-trigger enter animations / scrolls).
-         // Covers:
-         //   - completed/error arriving after content was already set (e.g. edit
-         //     diff shown during running, then same diff on completed)
-         //   - running→completed where entry.content is empty (apply_patch
-         //     completed events carry content:'')
-         const incomingHasContent = entry.content.trim().length > 0;
-         const existingHasContent = existing.content.trim().length > 0;
-         const isStatusOnlyUpdate =
-           entry.toolStatus &&
-           entry.toolStatus !== 'running' &&
-           entry.toolStatus !== 'pending' &&
-           existingHasContent &&
-           (
-             // Case 1: existing is NOT running (duplicate completed/error)
-             existing.toolStatus !== 'running' ||
-             // Case 2: existing IS running but incoming has no new content
-             !incomingHasContent ||
-             // Case 3: existing IS running and incoming content is identical
-             entry.content.trim() === existing.content.trim()
-           );
+        // Lightweight status-only update: when the incoming event carries no
+        // new visual content we just patch metadata in-place to avoid a full
+        // reactive splice (which would re-trigger enter animations / scrolls).
+        // Covers:
+        //   - completed/error arriving after content was already set (e.g. edit
+        //     diff shown during running, then same diff on completed)
+        //   - running→completed where entry.content is empty (apply_patch
+        //     completed events carry content:'')
+        const incomingHasContent = entry.content.trim().length > 0;
+        const existingHasContent = existing.content.trim().length > 0;
+        const isStatusOnlyUpdate =
+          entry.toolStatus &&
+          entry.toolStatus !== 'running' &&
+          entry.toolStatus !== 'pending' &&
+          existingHasContent &&
+          // Case 1: existing is NOT running (duplicate completed/error)
+          (existing.toolStatus !== 'running' ||
+            // Case 2: existing IS running but incoming has no new content
+            !incomingHasContent ||
+            // Case 3: existing IS running and incoming content is identical
+            entry.content.trim() === existing.content.trim());
         if (isStatusOnlyUpdate) {
           const nextExpiresAt = resolveExpiry(entry.toolStatus, time, defaultExpiry);
           existing.time = time;
@@ -9111,26 +9295,24 @@ function upsertToolEntry(
         }
         const nextPath = entry.path ?? existing.path;
         const nextDisplayPath = resolveWorktreeRelativePath(nextPath);
-        const nextHeader = isBashTool || hideHeader
-          ? ''
-          : nextDisplayPath
-            ? `# ${nextDisplayPath}\n\n`
-            : eventType !== 'message'
-              ? `# ${eventType}\n\n`
-              : '';
-        const nextContent = entry.content.trim().length > 0
-          ? entry.content
-          : existing.content;
+        const nextHeader =
+          isBashTool || hideHeader
+            ? ''
+            : nextDisplayPath
+              ? `# ${nextDisplayPath}\n\n`
+              : eventType !== 'message'
+                ? `# ${eventType}\n\n`
+                : '';
+        const nextContent = entry.content.trim().length > 0 ? entry.content : existing.content;
         const nextWrapMode = entry.wrapMode ?? existing.toolWrapMode;
         const nextGutterMode = entry.gutterMode ?? existing.toolGutterMode;
         const nextGutterLines = entry.gutterLines ?? existing.toolGutterLines;
         const nextGrepPattern = entry.grepPattern ?? existing.grepPattern;
-        const nextAutoDetectedDiff = !entry.view && !existing.view && detectDiffLike(nextContent, nextPath);
-        const nextLang =
-          entry.lang ??
-          existing.lang ??
-          guessLanguage(nextPath, eventType);
-        const nextView: FileReadEntry['view'] = entry.view ?? existing.view ?? (nextAutoDetectedDiff ? 'diff' : undefined);
+        const nextAutoDetectedDiff =
+          !entry.view && !existing.view && detectDiffLike(nextContent, nextPath);
+        const nextLang = entry.lang ?? existing.lang ?? guessLanguage(nextPath, eventType);
+        const nextView: FileReadEntry['view'] =
+          entry.view ?? existing.view ?? (nextAutoDetectedDiff ? 'diff' : undefined);
         const toolKey =
           existing.toolKey ?? entry.callId ?? `${nextPath ?? entry.toolName ?? 'tool'}:${time}`;
         const nextExpiresAt = resolveExpiry(entry.toolStatus, time, defaultExpiry);
@@ -9145,7 +9327,7 @@ function upsertToolEntry(
           scroll: false,
           scrollDistance,
           scrollDuration,
-          scrollDelay: 0.10,
+          scrollDelay: 0.1,
           html: '',
           isWrite: entry.isWrite,
           isMessage: false,
@@ -9205,9 +9387,7 @@ function upsertToolEntry(
   scheduleToolScrollAnimation(toolKey);
 }
 
-function registerGlobalEventHook(
-  handler: (payload: unknown, eventType: string) => void,
-) {
+function registerGlobalEventHook(handler: (payload: unknown, eventType: string) => void) {
   globalEventHooks.add(handler);
   return () => globalEventHooks.delete(handler);
 }
@@ -9242,7 +9422,6 @@ function extractEventDirectory(payload: unknown) {
     (typeof properties?.directory === 'string' ? properties.directory : undefined);
   return value?.trim() ?? '';
 }
-
 
 const src = shallowRef<EventSource>();
 function connect() {
@@ -9360,8 +9539,10 @@ function connect() {
       }
       if (sessionId && sessionId !== selectedId) return;
       const eventDirectory = extractEventDirectory(payload);
-      if (eventDirectory && normalizeDirectory(eventDirectory) !== normalizeDirectory(directory)) return;
-      const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
+      if (eventDirectory && normalizeDirectory(eventDirectory) !== normalizeDirectory(directory))
+        return;
+      const record =
+        payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : undefined;
       const payloadObj =
         record?.payload && typeof record.payload === 'object'
           ? (record.payload as Record<string, unknown>)
@@ -9424,12 +9605,12 @@ function connect() {
       }
     }
 
-      const stepFinish = extractStepFinish(payload, resolvedEventType);
-      if (stepFinish) {
-        if (markReasoningFinished(stepFinish.sessionId ?? sessionId, stepFinish.messageId)) {
-          scheduleReasoningClose(stepFinish.sessionId ?? sessionId);
-        }
+    const stepFinish = extractStepFinish(payload, resolvedEventType);
+    if (stepFinish) {
+      if (markReasoningFinished(stepFinish.sessionId ?? sessionId, stepFinish.messageId)) {
+        scheduleReasoningClose(stepFinish.sessionId ?? sessionId);
       }
+    }
 
     const usageUpdate = extractUsageUpdate(payload, resolvedEventType);
     if (usageUpdate) {
@@ -9469,7 +9650,9 @@ function connect() {
 
     const fileReadResult = extractFileRead(payload, resolvedEventType);
     const fileReads = fileReadResult
-      ? Array.isArray(fileReadResult) ? fileReadResult : [fileReadResult]
+      ? Array.isArray(fileReadResult)
+        ? fileReadResult
+        : [fileReadResult]
       : null;
     if (!fileReads) {
       const message = extractMessage(payload, resolvedEventType);
@@ -9588,13 +9771,15 @@ function connect() {
       if (isReasoning && reasoningMessageId) {
         activeReasoningMessageIdByKey.set(reasoningKey, reasoningMessageId);
         const finished = finishedReasoningByKey.get(reasoningKey);
-        if (finished && finished.id !== reasoningMessageId) finishedReasoningByKey.delete(reasoningKey);
+        if (finished && finished.id !== reasoningMessageId)
+          finishedReasoningByKey.delete(reasoningKey);
       }
       const lastReasoningMessageId = isReasoning
         ? lastReasoningMessageIdByKey.get(messageKey)
         : undefined;
-      const isNewReasoningMessage =
-        Boolean(isReasoning && reasoningMessageId && lastReasoningMessageId !== reasoningMessageId);
+      const isNewReasoningMessage = Boolean(
+        isReasoning && reasoningMessageId && lastReasoningMessageId !== reasoningMessageId,
+      );
       if (isReasoning && reasoningMessageId && lastReasoningMessageId !== reasoningMessageId) {
         lastReasoningMessageIdByKey.set(messageKey, reasoningMessageId);
         messagePartsById.delete(messageKey);
@@ -9664,7 +9849,9 @@ function connect() {
       const scrollDistance = Math.max(0, overflowLines * lineHeight);
       const scrollDuration =
         overflowLines > 0 ? Math.min(0.25, Math.max(0.08, overflowLines * 0.01)) : 0;
-      const reasoningFinish = isReasoning ? getReasoningFinish(reasoningKey, reasoningMessageId) : null;
+      const reasoningFinish = isReasoning
+        ? getReasoningFinish(reasoningKey, reasoningMessageId)
+        : null;
       const expiresAt = isReasoning
         ? reasoningFinish
           ? reasoningFinish.time + REASONING_CLOSE_DELAY_MS
@@ -9721,9 +9908,12 @@ function connect() {
           const existingRound = queue.value[existingRoundIndex];
           if (existingRound) {
             const existingRoundMessages = existingRound.roundMessages ?? [];
-            const roundMessageIndex = existingRoundMessages.findIndex((entry) => entry.messageId === roundId);
+            const roundMessageIndex = existingRoundMessages.findIndex(
+              (entry) => entry.messageId === roundId,
+            );
             const nextRoundMessages = [...existingRoundMessages];
-            if (roundMessageIndex >= 0) nextRoundMessages.splice(roundMessageIndex, 1, roundRootMessage);
+            if (roundMessageIndex >= 0)
+              nextRoundMessages.splice(roundMessageIndex, 1, roundRootMessage);
             else nextRoundMessages.unshift(roundRootMessage);
             existingRound.roundMessages = nextRoundMessages;
             queue.value.splice(existingRoundIndex, 1, {
@@ -9770,10 +9960,10 @@ function connect() {
             scrollDuration: 0,
             html: '',
             attachments,
-             isWrite: false,
-             isMessage: true,
-             isSubagentMessage: false,
-             isRound: true,
+            isWrite: false,
+            isMessage: true,
+            isSubagentMessage: false,
+            isRound: true,
             roundId,
             roundMessages: [roundRootMessage],
             roundDiffs: [],
@@ -9803,9 +9993,13 @@ function connect() {
         const existing = queue.value[existingIndex];
         const priorContent = existing?.content ?? '';
         const nextContent = isReasoning
-          ? mergeReasoningContent(messageContentById.get(messageKey) ?? priorContent, mergedContent, {
-              ensureTrailingNewline: isNewReasoningMessage,
-            })
+          ? mergeReasoningContent(
+              messageContentById.get(messageKey) ?? priorContent,
+              mergedContent,
+              {
+                ensureTrailingNewline: isNewReasoningMessage,
+              },
+            )
           : mergedContent;
         if (existing) {
           const nextText = `${header}${nextContent}`;
@@ -9822,9 +10016,7 @@ function connect() {
           const nextMessageVariant = displayMeta?.variant ?? existing.messageVariant;
           const nextMessageTime = resolvedTime ?? existing.messageTime;
           const nextAttachments =
-            attachments && attachments.length > 0
-              ? attachments
-              : existing.attachments;
+            attachments && attachments.length > 0 ? attachments : existing.attachments;
           queue.value.splice(existingIndex, 1, {
             ...existing,
             time,
@@ -9915,14 +10107,17 @@ function connect() {
           const saved = pendingReadInfoByCallId.get(entry.callId);
           pendingReadInfoByCallId.delete(entry.callId);
           if (saved) {
-            void hydrateAndPopupRead({
-              ...entry,
-              path: saved.path,
-              readOffset: saved.readOffset,
-              readLimit: saved.readLimit,
-              lang: saved.lang ?? entry.lang,
-              toolTitle: saved.toolTitle ?? entry.toolTitle,
-            }, saved.eventType);
+            void hydrateAndPopupRead(
+              {
+                ...entry,
+                path: saved.path,
+                readOffset: saved.readOffset,
+                readLimit: saved.readLimit,
+                lang: saved.lang ?? entry.lang,
+                toolTitle: saved.toolTitle ?? entry.toolTitle,
+              },
+              saved.eventType,
+            );
           } else {
             void hydrateAndPopupRead(entry, e.type);
           }

@@ -1,12 +1,14 @@
 # bash
 
 ## 1. Input
+
 - `command`: Shell command to run.
 - `timeout`: Timeout in milliseconds (optional).
 - `workdir`: Working directory (optional).
 - `description`: Short description (5-10 words).
 
 ## 2. Output
+
 - `title`: The description provided in the input.
 - `output`: Combined stdout/stderr text.
 - `metadata.output`: Truncated output preview.
@@ -14,6 +16,7 @@
 - `metadata.description`: Input description.
 
 ## 3. JSON Example
+
 ```json
 {
   "command": "pytest tests",
@@ -24,5 +27,6 @@
 ```
 
 ## 4. Notes
+
 - Commands are parsed before execution and may require permission checks.
 - On timeout or abort, metadata is appended to the output.

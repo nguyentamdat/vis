@@ -1,5 +1,9 @@
 <template>
-  <div ref="root" class="ui-dropdown" :class="{ 'is-open': isActive, 'is-disabled': props.disabled }">
+  <div
+    ref="root"
+    class="ui-dropdown"
+    :class="{ 'is-open': isActive, 'is-disabled': props.disabled }"
+  >
     <slot name="trigger">
       <button
         type="button"
@@ -33,7 +37,17 @@
 </template>
 
 <script lang="ts" setup generic="T">
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type StyleValue } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  provide,
+  reactive,
+  ref,
+  watch,
+  type StyleValue,
+} from 'vue';
 
 export interface DropdownAPI {
   select: (item: unknown) => void;
@@ -88,7 +102,9 @@ watch(isActive, (active) => {
 
 function getCandidateItems(): HTMLElement[] {
   if (!menu.value) return [];
-  return Array.from(menu.value.querySelectorAll('.ui-input-candidate-item:not([aria-disabled="true"])'));
+  return Array.from(
+    menu.value.querySelectorAll('.ui-input-candidate-item:not([aria-disabled="true"])'),
+  );
 }
 
 function clearHighlight() {
@@ -113,7 +129,8 @@ function moveHighlight(direction: 'up' | 'down') {
   if (direction === 'down') {
     nextIndex = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
   } else {
-    nextIndex = currentIndex >= 0 ? (currentIndex - 1 + items.length) % items.length : items.length - 1;
+    nextIndex =
+      currentIndex >= 0 ? (currentIndex - 1 + items.length) % items.length : items.length - 1;
   }
   highlightItem(items[nextIndex]);
 }

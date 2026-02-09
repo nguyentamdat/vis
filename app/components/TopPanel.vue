@@ -18,9 +18,7 @@
             </div>
           </template>
         </Dropdown>
-        <button type="button" class="control-button" @click="$emit('open-directory')">
-          Open
-        </button>
+        <button type="button" class="control-button" @click="$emit('open-directory')">Open</button>
       </div>
 
       <div class="top-field">
@@ -101,9 +99,7 @@
             </div>
           </template>
         </Dropdown>
-        <button type="button" class="control-button" @click="$emit('new-session')">
-          New
-        </button>
+        <button type="button" class="control-button" @click="$emit('new-session')">New</button>
       </div>
     </div>
   </div>

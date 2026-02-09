@@ -49,7 +49,10 @@ function languageCandidates(lang: string) {
   return [trimmed, 'text'];
 }
 
-async function resolveLanguage(highlighter: Awaited<ReturnType<typeof createHighlighter>>, lang: string) {
+async function resolveLanguage(
+  highlighter: Awaited<ReturnType<typeof createHighlighter>>,
+  lang: string,
+) {
   const loaded =
     typeof highlighter.getLoadedLanguages === 'function' ? highlighter.getLoadedLanguages() : [];
   loaded.forEach((item) => loadedLanguageCache.add(item));
@@ -105,7 +108,11 @@ function buildHtmlFromRows(rows: string) {
   return `<div class="code-host"><pre class="shiki"><code>${rows}</code></pre></div>`;
 }
 
-function buildCodeRows(lines: string[], mode: 'none' | 'single' | 'double', gutterLines?: string[]) {
+function buildCodeRows(
+  lines: string[],
+  mode: 'none' | 'single' | 'double',
+  gutterLines?: string[],
+) {
   return lines
     .map((line, index) => {
       if (mode === 'none') {
@@ -144,7 +151,6 @@ function generateUnifiedDiff(before: string, after: string, contextLines = 3): s
   const offset = max;
   v[offset + 1] = 0;
 
-  type Snake = { prevK: number; prevD: number; x: number; y: number };
   const trace: Array<Int32Array> = [];
 
   outer: for (let d = 0; d <= max; d++) {
@@ -169,7 +175,10 @@ function generateUnifiedDiff(before: string, after: string, contextLines = 3): s
   }
 
   // Backtrack to get the edit path
-  interface Edit { type: ' ' | '+' | '-'; text: string }
+  interface Edit {
+    type: ' ' | '+' | '-';
+    text: string;
+  }
   const edits: Edit[] = [];
   let cx = n;
   let cy = m;
@@ -209,11 +218,14 @@ function generateUnifiedDiff(before: string, after: string, contextLines = 3): s
   if (edits.length === 0) return '';
 
   // Group into hunks with context
-  type Hunk = { oldStart: number; oldCount: number; newStart: number; newCount: number; lines: string[] };
+  type Hunk = {
+    oldStart: number;
+    oldCount: number;
+    newStart: number;
+    newCount: number;
+    lines: string[];
+  };
   const hunks: Hunk[] = [];
-  let oldLine = 1;
-  let newLine = 1;
-
   // Find change regions
   const changeIndices: number[] = [];
   edits.forEach((e, i) => {
@@ -223,8 +235,6 @@ function generateUnifiedDiff(before: string, after: string, contextLines = 3): s
   if (changeIndices.length === 0) return '';
 
   // Merge nearby changes into hunks
-  let hunkStart = 0;
-  let hunkEnd = 0;
   const groups: Array<[number, number]> = [];
   let groupStart = changeIndices[0];
   let groupEnd = changeIndices[0];
@@ -564,8 +574,10 @@ function reconstructSourcesFromDiff(diff: string): { before: string; after: stri
   const buildPadded = (entries: Array<[number, string]>) => {
     if (entries.length === 0) return '';
     const maxLine = entries.reduce((m, [n]) => Math.max(m, n), 0);
-    const arr = new Array<string>(maxLine).fill('');
-    entries.forEach(([n, text]) => { arr[n - 1] = text; });
+    const arr = Array.from<string>({ length: maxLine }).fill('');
+    entries.forEach(([n, text]) => {
+      arr[n - 1] = text;
+    });
     return arr.join('\n');
   };
 
@@ -614,35 +626,51 @@ function buildDiffHtmlFromCode(
           newLine = Number(match[2]);
         }
         inHunk = true;
-        output.push({ html: `<span class="line">${escapeHtml(line)}</span>`, rowClass: 'line-hunk' });
+        output.push({
+          html: `<span class="line">${escapeHtml(line)}</span>`,
+          rowClass: 'line-hunk',
+        });
         return;
       }
       if (isDiffMetadataLine(line) || line.startsWith('\\')) {
         inHunk = false;
-        output.push({ html: `<span class="line">${escapeHtml(line)}</span>`, rowClass: 'line-header' });
+        output.push({
+          html: `<span class="line">${escapeHtml(line)}</span>`,
+          rowClass: 'line-header',
+        });
         return;
       }
       if (!inHunk) {
-        output.push({ html: `<span class="line">${escapeHtml(line)}</span>`, rowClass: 'line-header' });
+        output.push({
+          html: `<span class="line">${escapeHtml(line)}</span>`,
+          rowClass: 'line-header',
+        });
         return;
       }
       if (line.startsWith('+') && !line.startsWith('+++')) {
-        const htmlLine = afterLines[newLine - 1] ?? `<span class="line">${escapeHtml(line.slice(1))}</span>`;
+        const htmlLine =
+          afterLines[newLine - 1] ?? `<span class="line">${escapeHtml(line.slice(1))}</span>`;
         output.push({ html: htmlLine, rowClass: 'line-added' });
         newLine += 1;
         return;
       }
       if (line.startsWith('-') && !line.startsWith('---')) {
-        const htmlLine = beforeLines[oldLine - 1] ?? `<span class="line">${escapeHtml(line.slice(1))}</span>`;
+        const htmlLine =
+          beforeLines[oldLine - 1] ?? `<span class="line">${escapeHtml(line.slice(1))}</span>`;
         output.push({ html: htmlLine, rowClass: 'line-removed' });
         oldLine += 1;
         return;
       }
       if (!line.startsWith(' ')) {
-        output.push({ html: `<span class="line">${escapeHtml(line)}</span>`, rowClass: 'line-header' });
+        output.push({
+          html: `<span class="line">${escapeHtml(line)}</span>`,
+          rowClass: 'line-header',
+        });
         return;
       }
-      const htmlLine = beforeLines[oldLine - 1] ?? `<span class="line">${escapeHtml(line.replace(/^ /, ''))}</span>`;
+      const htmlLine =
+        beforeLines[oldLine - 1] ??
+        `<span class="line">${escapeHtml(line.replace(/^ /, ''))}</span>`;
       output.push({ html: htmlLine });
       oldLine += 1;
       newLine += 1;
@@ -662,7 +690,7 @@ async function renderCodeHtml(request: RenderRequest) {
   let gutterLines = request.gutterLines;
 
   const hasRange =
-    typeof request.lineOffset === 'number' && request.lineOffset > 0 ||
+    (typeof request.lineOffset === 'number' && request.lineOffset > 0) ||
     typeof request.lineLimit === 'number';
   if (hasRange) {
     const offset = typeof request.lineOffset === 'number' ? Math.max(0, request.lineOffset) : 0;

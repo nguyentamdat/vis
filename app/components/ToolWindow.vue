@@ -3,7 +3,9 @@
     class="term"
     @pointerdown.capture="onFocus"
     :data-tool-key="entry.toolKey ?? entry.callId ?? undefined"
-    :data-message-key="entry.messageId ? buildMessageKey(entry.messageId, entry.sessionId) : undefined"
+    :data-message-key="
+      entry.messageId ? buildMessageKey(entry.messageId, entry.sessionId) : undefined
+    "
     :class="termClass"
     :style="termStyle"
   >
@@ -46,11 +48,7 @@
       />
     </div>
     <div v-if="statusBarText" class="term-statusbar">{{ statusBarText }}</div>
-    <div
-      v-if="showResizer"
-      class="term-resizer"
-      @pointerdown="onResizeStart"
-    ></div>
+    <div v-if="showResizer" class="term-resizer" @pointerdown="onResizeStart"></div>
   </div>
 </template>
 
@@ -140,9 +138,7 @@ const showResizer = computed(
     entry.value.isQuestion,
 );
 
-const isFloatingMessage = computed(
-  () => entry.value.isReasoning || entry.value.isSubagentMessage,
-);
+const isFloatingMessage = computed(() => entry.value.isReasoning || entry.value.isSubagentMessage);
 
 const agentColor = computed(() => {
   if (entry.value.isMessage) {
@@ -182,7 +178,7 @@ const termStyle = computed(() => {
     '--term-height': entry.value.height ? `${entry.value.height}px` : undefined,
     zIndex: entry.value.zIndex ?? undefined,
   };
-  
+
   if (agentColor.value) {
     const c = agentColor.value;
     base['--agent-color'] = c;
@@ -207,7 +203,8 @@ const viewerWrapMode = computed<'default' | 'soft'>(() => {
 
 const viewerGutterMode = computed<'none' | 'single' | 'double'>(() => {
   if (isDiff.value) return 'double';
-  if (entry.value.isMessage || entry.value.isReasoning || entry.value.isSubagentMessage) return 'none';
+  if (entry.value.isMessage || entry.value.isReasoning || entry.value.isSubagentMessage)
+    return 'none';
   if (entry.value.toolGutterMode === 'grep-source') return 'single';
   if (entry.value.toolGutterMode === 'none') return 'none';
   return 'single';
@@ -227,9 +224,7 @@ const renderParams = computed<CodeRenderParams | null>(() => {
     };
   }
 
-  const code = e.isMessage
-    ? (e.content ?? '')
-    : `${e.header ?? ''}${e.content ?? ''}`;
+  const code = e.isMessage ? (e.content ?? '') : `${e.header ?? ''}${e.content ?? ''}`;
   if (!code) return null;
 
   const lang = e.lang ?? (e.isMessage ? 'markdown' : 'text');
@@ -495,5 +490,4 @@ function onRendered() {
     transform: translateY(calc(-1 * var(--scroll-distance)));
   }
 }
-
 </style>

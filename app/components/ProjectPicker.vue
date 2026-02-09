@@ -250,7 +250,8 @@ async function runSearch(query: string) {
           return candidate.startsWith(filterText);
         })
         .map((node) => {
-          const absolute = node.absolute || node.path || `${basePath.replace(/\/+$/, '')}/${node.name}`;
+          const absolute =
+            node.absolute || node.path || `${basePath.replace(/\/+$/, '')}/${node.name}`;
           return buildSearchResult(absolute, absolute, filterText);
         });
       searchResults.value = sortResults(results);

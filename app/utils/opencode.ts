@@ -61,20 +61,14 @@ export function getPathInfo(baseUrl: string) {
   return getJson(baseUrl, '/path') as Promise<Record<string, string>>;
 }
 
-export function listFiles(
-  baseUrl: string,
-  payload: { directory: string; path?: string },
-) {
+export function listFiles(baseUrl: string, payload: { directory: string; path?: string }) {
   return getJson(baseUrl, '/file', {
     directory: payload.directory,
     path: payload.path,
   }) as Promise<unknown>;
 }
 
-export function readFileContent(
-  baseUrl: string,
-  payload: { directory: string; path: string },
-) {
+export function readFileContent(baseUrl: string, payload: { directory: string; path: string }) {
   return getJson(baseUrl, '/file/content', {
     directory: payload.directory,
     path: payload.path,
@@ -89,7 +83,6 @@ export function getSessionDiff(
     directory: payload.directory,
   }) as Promise<unknown>;
 }
-
 
 export function listProjects(baseUrl: string, directory?: string) {
   return getJson(baseUrl, '/project', { directory }) as Promise<unknown>;
@@ -195,12 +188,26 @@ export function listPendingQuestions(baseUrl: string, directory?: string) {
   return getJson(baseUrl, '/question', { directory }) as Promise<unknown>;
 }
 
-export function listSessionMessages(baseUrl: string, sessionId: string, options: { directory?: string; limit?: number } = {}) {
-  return getJson(baseUrl, `/session/${sessionId}/message`, { directory: options.directory, limit: options.limit }) as Promise<unknown>;
+export function listSessionMessages(
+  baseUrl: string,
+  sessionId: string,
+  options: { directory?: string; limit?: number } = {},
+) {
+  return getJson(baseUrl, `/session/${sessionId}/message`, {
+    directory: options.directory,
+    limit: options.limit,
+  }) as Promise<unknown>;
 }
 
-export function getSessionMessage(baseUrl: string, sessionId: string, messageId: string, directory?: string) {
-  return getJson(baseUrl, `/session/${sessionId}/message/${messageId}`, { directory }) as Promise<unknown>;
+export function getSessionMessage(
+  baseUrl: string,
+  sessionId: string,
+  messageId: string,
+  directory?: string,
+) {
+  return getJson(baseUrl, `/session/${sessionId}/message/${messageId}`, {
+    directory,
+  }) as Promise<unknown>;
 }
 
 export function getSessionTodos(baseUrl: string, sessionId: string, directory?: string) {

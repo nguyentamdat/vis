@@ -9,7 +9,10 @@
         @touchmove="$emit('touchmove')"
       >
         <div ref="contentEl" class="output-panel-content">
-          <template v-for="q in filteredQueue" :key="q.messageKey ?? q.roundId ?? q.messageId ?? q.time">
+          <template
+            v-for="q in filteredQueue"
+            :key="q.messageKey ?? q.roundId ?? q.messageId ?? q.time"
+          >
             <!-- ===== Round: nested box layout ===== -->
             <div v-if="q.isRound" class="info-block">
               <!-- Fork button (top-right) -->
@@ -18,7 +21,9 @@
                 type="button"
                 class="ib-action ib-top-right"
                 @click="confirmFork(q)"
-              >FORK</button>
+              >
+                FORK
+              </button>
 
               <!-- User message (always visible, agent theme left border) -->
               <div class="ib-user-box" :style="getUserBoxStyle(q)">
@@ -42,15 +47,16 @@
               </div>
 
               <!-- Target agent/model separator -->
-              <div v-if="formatRoundTargetLabel(q)" class="ib-round-target" :style="getRoundTargetStyle(q)">
+              <div
+                v-if="formatRoundTargetLabel(q)"
+                class="ib-round-target"
+                :style="getRoundTargetStyle(q)"
+              >
                 {{ formatRoundTargetLabel(q) }}
               </div>
 
               <!-- Assistant response area (no collapse, fade transition per message) -->
-              <div
-                v-if="hasAssistantMessages(q)"
-                class="ib-response-area"
-              >
+              <div v-if="hasAssistantMessages(q)" class="ib-response-area">
                 <template v-for="(group, gi) in groupRoundMessages(q)" :key="gi">
                   <template v-if="group.role === 'assistant'">
                     <Transition name="ib-fade" mode="out-in">
@@ -75,12 +81,13 @@
                           class="ib-action ib-action-history"
                           :title="`${group.messages.length} messages – click to view history`"
                           @click="showGroupHistory(q, group)"
-                        >^ {{ group.messages.length }}</button>
+                        >
+                          ^ {{ group.messages.length }}
+                        </button>
                       </div>
                     </Transition>
                   </template>
                 </template>
-
               </div>
 
               <!-- Error indicator (e.g. abort) -->
@@ -98,13 +105,17 @@
                     type="button"
                     class="ib-action ib-action-diff"
                     @click="showRoundDiff(q)"
-                  >DIFF</button>
+                  >
+                    DIFF
+                  </button>
                   <button
                     v-if="q.roundId && q.sessionId && q.messageKey && hasMessageDiffs(q.messageKey)"
                     type="button"
                     class="ib-action ib-action-danger"
                     @click="confirmRevert(q)"
-                  >REVERT</button>
+                  >
+                    REVERT
+                  </button>
                 </span>
               </div>
             </div>
@@ -120,7 +131,9 @@
                 v-if="q.role === 'user' && formatMessageAgent(q)"
                 class="output-entry-agent"
                 :style="getAgentTextStyle(q)"
-              >{{ formatMessageAgent(q) }}</div>
+              >
+                {{ formatMessageAgent(q) }}
+              </div>
               <div
                 class="output-entry-inner"
                 :class="{ 'is-scrolling': q.scroll }"
@@ -138,7 +151,10 @@
                   :is-message="true"
                   @rendered="handleMessageRendered"
                 />
-                <div v-if="q.attachments && q.attachments.length > 0" class="output-entry-attachments">
+                <div
+                  v-if="q.attachments && q.attachments.length > 0"
+                  class="output-entry-attachments"
+                >
                   <img
                     v-for="item in q.attachments"
                     :key="item.id"
@@ -151,9 +167,17 @@
               </div>
               <div v-if="hasFooter(q)" class="output-entry-footer">
                 <div class="output-entry-footer-left">
-                  <span v-if="formatMessageMeta(q)" class="output-entry-meta">{{ formatMessageMeta(q) }}</span>
-                  <span v-if="formatMessageMeta(q) && formatMessageUsage(q)" class="output-entry-sep">•</span>
-                  <span v-if="formatMessageUsage(q)" class="output-entry-usage">{{ formatMessageUsage(q) }}</span>
+                  <span v-if="formatMessageMeta(q)" class="output-entry-meta">{{
+                    formatMessageMeta(q)
+                  }}</span>
+                  <span
+                    v-if="formatMessageMeta(q) && formatMessageUsage(q)"
+                    class="output-entry-sep"
+                    >•</span
+                  >
+                  <span v-if="formatMessageUsage(q)" class="output-entry-usage">{{
+                    formatMessageUsage(q)
+                  }}</span>
                 </div>
                 <div class="output-entry-footer-right">
                   <button
@@ -161,19 +185,31 @@
                     type="button"
                     class="output-entry-action output-entry-action-diff"
                     @click="showMessageDiff(q)"
-                  >DIFF</button>
+                  >
+                    DIFF
+                  </button>
                   <button
                     v-if="q.role === 'user' && q.messageId && q.sessionId"
                     type="button"
                     class="output-entry-action"
                     @click="confirmFork(q)"
-                  >FORK</button>
+                  >
+                    FORK
+                  </button>
                   <button
-                    v-if="q.role === 'user' && q.messageId && q.sessionId && q.messageKey && hasMessageDiffs(q.messageKey)"
+                    v-if="
+                      q.role === 'user' &&
+                      q.messageId &&
+                      q.sessionId &&
+                      q.messageKey &&
+                      hasMessageDiffs(q.messageKey)
+                    "
                     type="button"
                     class="output-entry-action output-entry-action-danger"
                     @click="confirmRevert(q)"
-                  >REVERT</button>
+                  >
+                    REVERT
+                  </button>
                 </div>
               </div>
             </div>
@@ -184,14 +220,19 @@
             class="follow-button"
             aria-label="Scroll to latest"
             @click="$emit('resume-follow')"
-          >↓</button>
+          >
+            ↓
+          </button>
         </div>
       </div>
       <div class="statusbar" role="status" aria-live="polite">
         <div class="statusbar-section statusbar-left">
           <span class="statusbar-text">{{ thinkingDisplayText }}</span>
         </div>
-        <div class="statusbar-section statusbar-right" :class="{ 'is-error': isStatusError, 'is-retry': isRetryStatus }">
+        <div
+          class="statusbar-section statusbar-right"
+          :class="{ 'is-error': isStatusError, 'is-retry': isRetryStatus }"
+        >
           {{ statusText }}
         </div>
       </div>
@@ -286,7 +327,10 @@ const props = defineProps<{
   busyDescendantCount?: number;
   theme: string;
   resolveAgentColor?: (agent?: string) => string;
-  messageDiffs?: Map<string, Array<{ file: string; diff: string; before?: string; after?: string }>>;
+  messageDiffs?: Map<
+    string,
+    Array<{ file: string; diff: string; before?: string; after?: string }>
+  >;
 }>();
 
 const emit = defineEmits<{
@@ -296,12 +340,18 @@ const emit = defineEmits<{
   (event: 'resume-follow'): void;
   (event: 'fork-message', payload: { sessionId: string; messageId: string }): void;
   (event: 'revert-message', payload: { sessionId: string; messageId: string }): void;
-  (event: 'show-message-diff', payload: { messageKey: string; diffs: Array<{ file: string; diff: string; before?: string; after?: string }> }): void;
+  (
+    event: 'show-message-diff',
+    payload: {
+      messageKey: string;
+      diffs: Array<{ file: string; diff: string; before?: string; after?: string }>;
+    },
+  ): void;
   (event: 'show-message-history', payload: { roundId: string; contents: string[] }): void;
 }>();
 
-const filteredQueue = computed(() => 
-  props.queue.filter((entry) => entry.isMessage && !entry.isSubagentMessage)
+const filteredQueue = computed(() =>
+  props.queue.filter((entry) => entry.isMessage && !entry.isSubagentMessage),
 );
 
 function formatRoundMeta(entry: FileReadEntry): string {
@@ -310,7 +360,7 @@ function formatRoundMeta(entry: FileReadEntry): string {
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
   const model = lastAssistant?.model ?? entry.messageModel;
   const variant = lastAssistant?.variant ?? entry.messageVariant;
-  const modelPart = variant ? `${model} (${variant})` : (model || '');
+  const modelPart = variant ? `${model} (${variant})` : model || '';
   const timestamp = formatMessageTime(lastAssistant?.time ?? entry.messageTime);
   return [timestamp, modelPart].filter(Boolean).join(' - ');
 }
@@ -412,7 +462,15 @@ function groupRoundMessages(entry: FileReadEntry): MessageGroup[] {
       if (msg.modelId) current.modelId = msg.modelId;
       if (msg.variant) current.variant = msg.variant;
     } else {
-      current = { role, agent, model: msg.model, providerId: msg.providerId, modelId: msg.modelId, variant: msg.variant, messages: [msg] };
+      current = {
+        role,
+        agent,
+        model: msg.model,
+        providerId: msg.providerId,
+        modelId: msg.modelId,
+        variant: msg.variant,
+        messages: [msg],
+      };
       groups.push(current);
     }
   }
@@ -431,9 +489,8 @@ function formatSenderLabel(group: MessageGroup): string {
   if (group.role === 'user') return 'You';
   const parts: string[] = [];
   if (group.agent) parts.push(capitalize(group.agent));
-  const modelPath = group.providerId && group.modelId
-    ? `${group.providerId}/${group.modelId}`
-    : (group.model || '');
+  const modelPath =
+    group.providerId && group.modelId ? `${group.providerId}/${group.modelId}` : group.model || '';
   if (modelPath) parts.push(modelPath);
   if (group.variant) parts.push(`(${group.variant})`);
   return parts.join(' ') || 'Assistant';
@@ -442,9 +499,10 @@ function formatSenderLabel(group: MessageGroup): string {
 function formatRoundTargetLabel(entry: FileReadEntry): string {
   const parts: string[] = [];
   if (entry.messageAgent) parts.push(capitalize(entry.messageAgent));
-  const modelPath = entry.messageProviderId && entry.messageModelId
-    ? `${entry.messageProviderId}/${entry.messageModelId}`
-    : (entry.messageModel || '');
+  const modelPath =
+    entry.messageProviderId && entry.messageModelId
+      ? `${entry.messageProviderId}/${entry.messageModelId}`
+      : entry.messageModel || '';
   if (modelPath) parts.push(modelPath);
   if (entry.messageVariant) parts.push(`(${entry.messageVariant})`);
   return parts.join(' ');
@@ -555,14 +613,15 @@ function hasFooter(entry: FileReadEntry) {
   if (formatMessageMeta(entry)) return true;
   if (formatMessageUsage(entry)) return true;
   if (entry.role === 'user' && entry.messageId && entry.sessionId) return true;
-  if (entry.role === 'assistant' && entry.messageKey && hasMessageDiffs(entry.messageKey)) return true;
+  if (entry.role === 'assistant' && entry.messageKey && hasMessageDiffs(entry.messageKey))
+    return true;
   return false;
 }
 
 function formatMessageMeta(entry: FileReadEntry) {
   const model = entry.messageModel?.trim();
   const variant = entry.messageVariant?.trim();
-  const modelPart = variant ? `${model} (${variant})` : (model || '');
+  const modelPart = variant ? `${model} (${variant})` : model || '';
   const timestamp = formatMessageTime(entry.messageTime);
   return [timestamp, modelPart].filter(Boolean).join(' - ');
 }
@@ -576,9 +635,8 @@ function formatMessageUsage(entry: FileReadEntry) {
   const output = formatCompactCount(tokens.output);
   const reasoning = formatCompactCount(tokens.reasoning);
   if (input === '0' && output === '0' && reasoning === '0') return '';
-  const cost = typeof entry.messageUsage.cost === 'number'
-    ? formatCost(entry.messageUsage.cost)
-    : '$--';
+  const cost =
+    typeof entry.messageUsage.cost === 'number' ? formatCost(entry.messageUsage.cost) : '$--';
   return `In ${input} / Out ${output} / Reason ${reasoning} / ${cost}`;
 }
 
@@ -609,12 +667,12 @@ function getEntryStyle(entry: FileReadEntry) {
   const agent = entry.messageAgent;
   // If no resolver, fallback to neutral
   const color = props.resolveAgentColor ? props.resolveAgentColor(agent) : '#334155';
-  
+
   // If hex 6-digit, add alpha
   if (color.startsWith('#') && color.length === 7) {
     return {
       backgroundColor: `${color}2E`, // ~0.18
-      borderColor: `${color}99`,    // ~0.60
+      borderColor: `${color}99`, // ~0.60
     };
   }
   return { borderColor: color };
@@ -887,7 +945,6 @@ defineExpose({ panelEl });
   line-height: inherit !important;
 }
 
-
 .output-entry-attachments {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -980,7 +1037,6 @@ defineExpose({ panelEl });
 .follow-button:hover {
   background: rgba(30, 41, 59, 0.98);
 }
-
 
 .shiki-host :deep(pre),
 .shiki-host :deep(code) {
@@ -1215,5 +1271,4 @@ defineExpose({ panelEl });
 .ib-fade-leave-to {
   opacity: 0;
 }
-
 </style>

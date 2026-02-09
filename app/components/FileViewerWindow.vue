@@ -95,11 +95,27 @@ const activeDiffLang = computed(() => {
   const file = tabs[activeTabIndex.value]?.file ?? '';
   const ext = file.split('.').pop() ?? '';
   const langMap: Record<string, string> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    vue: 'vue', css: 'css', scss: 'scss', html: 'html',
-    json: 'json', md: 'markdown', py: 'python', rs: 'rust',
-    go: 'go', rb: 'ruby', java: 'java', c: 'c', cpp: 'cpp',
-    sh: 'bash', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+    ts: 'typescript',
+    tsx: 'tsx',
+    js: 'javascript',
+    jsx: 'jsx',
+    vue: 'vue',
+    css: 'css',
+    scss: 'scss',
+    html: 'html',
+    json: 'json',
+    md: 'markdown',
+    py: 'python',
+    rs: 'rust',
+    go: 'go',
+    rb: 'ruby',
+    java: 'java',
+    c: 'c',
+    cpp: 'cpp',
+    sh: 'bash',
+    yaml: 'yaml',
+    yml: 'yaml',
+    toml: 'toml',
   };
   return langMap[ext] ?? 'text';
 });
@@ -117,7 +133,7 @@ const renderParams = computed<CodeRenderParams | null>(() => {
     return {
       code: activeDiffCode.value,
       after: activeDiffAfter.value,
-      patch: hasTabs ? undefined : (e.content || undefined),
+      patch: hasTabs ? undefined : e.content || undefined,
       lang: activeDiffLang.value,
       theme: props.theme,
       gutterMode: viewerGutterMode.value,
@@ -203,7 +219,9 @@ function onClose() {
   cursor: pointer;
   white-space: nowrap;
   border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
 }
 
 .viewer-tab:hover {
@@ -286,7 +304,6 @@ function onClose() {
   font-size: 13px;
   user-select: none;
 }
-
 
 .viewer-resizer {
   position: absolute;

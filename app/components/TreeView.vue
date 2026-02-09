@@ -126,7 +126,11 @@ function cloneNodes(nodes: TreeNode[]): TreeNode[] {
 function normalizePath(value: string) {
   const trimmed = value.trim();
   if (!trimmed || trimmed === '.') return '';
-  return trimmed.replace(/^\.\//, '').replace(/^(\.\.\/)+/, '').replace(/^\//, '').replace(/\/$/, '');
+  return trimmed
+    .replace(/^\.\//, '')
+    .replace(/^(\.\.\/)+/, '')
+    .replace(/^\//, '')
+    .replace(/\/$/, '');
 }
 
 function withPseudoNodes(nodes: TreeNode[], statusByPath: Record<string, TreeStatus>): TreeNode[] {

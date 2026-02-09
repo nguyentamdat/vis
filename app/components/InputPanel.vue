@@ -55,103 +55,105 @@
         </div>
       </div>
     </div>
-      <div class="input-toolbar">
-        <div class="input-selects">
-          <div class="input-field compact">
+    <div class="input-toolbar">
+      <div class="input-selects">
+        <div class="input-field compact">
+          <Dropdown
+            v-model="modeValue"
+            :label="selectedAgentLabel"
+            :placeholder="hasAgentOptions ? 'Select agent' : 'Loading agents...'"
+            :disabled="!hasAgentOptions"
+            button-class="input-control input-dropdown-button"
+            :button-style="agentButtonStyle"
+            popup-class="input-dropdown-popup"
+            auto-close
+            title="Agent (Tab)"
+          >
+            <template #label>
+              <span class="ui-dropdown-label" :style="agentButtonLabelStyle">{{
+                selectedAgentLabel
+              }}</span>
+            </template>
+            <template #default>
+              <div class="dropdown-list">
+                <div v-if="!hasAgentOptions" class="dropdown-empty">Loading agents...</div>
+                <DropdownItem v-for="agent in agentOptions" :key="agent.id" :value="agent.id">
+                  <div class="agent-dropdown-item">
+                    <span class="agent-dropdown-name" :style="agentOptionNameStyle(agent)">
+                      {{ agent.label }}
+                    </span>
+                    <span v-if="agent.description" class="agent-dropdown-description">
+                      {{ agent.description }}
+                    </span>
+                  </div>
+                </DropdownItem>
+              </div>
+            </template>
+          </Dropdown>
+        </div>
+        <div class="input-field compact">
+          <div ref="modelDropdownRef" class="input-dropdown-root">
             <Dropdown
-              v-model="modeValue"
-              :label="selectedAgentLabel"
-              :placeholder="hasAgentOptions ? 'Select agent' : 'Loading agents...'"
-              :disabled="!hasAgentOptions"
+              v-model="modelValue"
+              :label="selectedModelDisplayName"
+              :placeholder="hasModelOptions ? 'Select model' : 'Loading models...'"
+              :disabled="!hasModelOptions"
               button-class="input-control input-dropdown-button"
               :button-style="agentButtonStyle"
               popup-class="input-dropdown-popup"
               auto-close
-              title="Agent (Tab)"
+              title="Model (Ctrl-M)"
             >
               <template #label>
-                <span class="ui-dropdown-label" :style="agentButtonLabelStyle">{{ selectedAgentLabel }}</span>
-              </template>
-              <template #default>
-                <div class="dropdown-list">
-                  <div v-if="!hasAgentOptions" class="dropdown-empty">Loading agents...</div>
-                  <DropdownItem v-for="agent in agentOptions" :key="agent.id" :value="agent.id">
-                    <div class="agent-dropdown-item">
-                      <span class="agent-dropdown-name" :style="agentOptionNameStyle(agent)">
-                        {{ agent.label }}
-                      </span>
-                      <span v-if="agent.description" class="agent-dropdown-description">
-                        {{ agent.description }}
-                      </span>
-                    </div>
-                  </DropdownItem>
+                <div class="model-button-label">
+                  <span class="model-button-name">{{ selectedModelDisplayName }}</span>
+                  <span v-if="selectedModelPath" class="model-button-path">{{
+                    selectedModelPath
+                  }}</span>
                 </div>
               </template>
-            </Dropdown>
-          </div>
-          <div class="input-field compact">
-            <div ref="modelDropdownRef" class="input-dropdown-root">
-              <Dropdown
-                v-model="modelValue"
-                :label="selectedModelDisplayName"
-                :placeholder="hasModelOptions ? 'Select model' : 'Loading models...'"
-                :disabled="!hasModelOptions"
-                button-class="input-control input-dropdown-button"
-                :button-style="agentButtonStyle"
-                popup-class="input-dropdown-popup"
-                auto-close
-                title="Model (Ctrl-M)"
-              >
-                <template #label>
-                  <div class="model-button-label">
-                    <span class="model-button-name">{{ selectedModelDisplayName }}</span>
-                    <span v-if="selectedModelPath" class="model-button-path">{{ selectedModelPath }}</span>
-                  </div>
-                </template>
-                <template #default>
-                  <div class="dropdown-list">
-                    <div v-if="!hasModelOptions" class="dropdown-empty">Loading models...</div>
-                    <template v-for="group in groupedModelOptions" :key="group.providerID">
-                      <div class="input-dropdown-group-label">{{ group.label }}</div>
-                      <DropdownItem v-for="model in group.models" :key="model.id" :value="model.id">
-                        <div class="model-dropdown-item">
-                          <span class="model-dropdown-name">{{ model.displayName }}</span>
-                          <span class="model-dropdown-path">{{ model.providerID }}/{{ model.id }}</span>
-                        </div>
-                      </DropdownItem>
-                    </template>
-                  </div>
-                </template>
-              </Dropdown>
-            </div>
-          </div>
-          <div class="input-field compact">
-            <Dropdown
-              v-model="selectedThinkingChoice"
-              :label="selectedThinkingLabel"
-              :placeholder="hasThinkingOptions ? 'Select variant' : 'Loading...'"
-              :disabled="!hasThinkingOptions"
-              button-class="input-control input-dropdown-button"
-              :button-style="agentButtonStyle"
-              popup-class="input-dropdown-popup"
-              auto-close
-              title="Variant (Ctrl-, / Ctrl-.)"
-            >
               <template #default>
                 <div class="dropdown-list">
-                  <div v-if="!hasThinkingOptions" class="dropdown-empty">Loading...</div>
-                  <DropdownItem
-                    v-for="option in thinkingChoices"
-                    :key="option.key"
-                    :value="option"
-                  >
-                    <span class="dropdown-item-label">{{ option.label }}</span>
-                  </DropdownItem>
+                  <div v-if="!hasModelOptions" class="dropdown-empty">Loading models...</div>
+                  <template v-for="group in groupedModelOptions" :key="group.providerID">
+                    <div class="input-dropdown-group-label">{{ group.label }}</div>
+                    <DropdownItem v-for="model in group.models" :key="model.id" :value="model.id">
+                      <div class="model-dropdown-item">
+                        <span class="model-dropdown-name">{{ model.displayName }}</span>
+                        <span class="model-dropdown-path"
+                          >{{ model.providerID }}/{{ model.id }}</span
+                        >
+                      </div>
+                    </DropdownItem>
+                  </template>
                 </div>
               </template>
             </Dropdown>
           </div>
         </div>
+        <div class="input-field compact">
+          <Dropdown
+            v-model="selectedThinkingChoice"
+            :label="selectedThinkingLabel"
+            :placeholder="hasThinkingOptions ? 'Select variant' : 'Loading...'"
+            :disabled="!hasThinkingOptions"
+            button-class="input-control input-dropdown-button"
+            :button-style="agentButtonStyle"
+            popup-class="input-dropdown-popup"
+            auto-close
+            title="Variant (Ctrl-, / Ctrl-.)"
+          >
+            <template #default>
+              <div class="dropdown-list">
+                <div v-if="!hasThinkingOptions" class="dropdown-empty">Loading...</div>
+                <DropdownItem v-for="option in thinkingChoices" :key="option.key" :value="option">
+                  <span class="dropdown-item-label">{{ option.label }}</span>
+                </DropdownItem>
+              </div>
+            </template>
+          </Dropdown>
+        </div>
+      </div>
       <button
         type="button"
         class="input-button attach-button"
@@ -186,7 +188,13 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import Dropdown from './Dropdown.vue';
 import DropdownItem from './Dropdown/Item.vue';
-type ModelOption = { id: string; label: string; displayName: string; providerID?: string; providerLabel?: string };
+type ModelOption = {
+  id: string;
+  label: string;
+  displayName: string;
+  providerID?: string;
+  providerLabel?: string;
+};
 type CommandOption = { name: string; description?: string; hints?: string[] };
 type AgentOption = { id: string; label: string; description?: string; color?: string };
 type ThinkingChoice = { key: string; value: string | undefined; label: string };
@@ -246,9 +254,7 @@ const commandMatches = computed(() => {
   if (/\s/.test(messageValue.value.slice(1))) return [];
   const query = slashQuery.value.trim().toLowerCase();
   const list = props.commands ?? [];
-  const matches = list.filter((command) =>
-    command.name.toLowerCase().startsWith(query),
-  );
+  const matches = list.filter((command) => command.name.toLowerCase().startsWith(query));
   const limit = 8;
   return matches.slice(0, limit);
 });
@@ -366,7 +372,13 @@ function handleKeydown(event: KeyboardEvent) {
       activeCommandIndex.value = (activeCommandIndex.value - 1 + total) % total;
       return;
     }
-    if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+    if (
+      event.key === 'Tab' &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      !event.altKey
+    ) {
       event.preventDefault();
       selectActiveCommand();
       return;

@@ -1,9 +1,5 @@
 <template>
-  <div
-    class="code-content"
-    :class="rootClass"
-    v-html="html"
-  ></div>
+  <div class="code-content" :class="rootClass" v-html="html"></div>
 </template>
 
 <script setup lang="ts">

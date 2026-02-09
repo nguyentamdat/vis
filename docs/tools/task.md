@@ -1,6 +1,7 @@
 # task
 
 ## 1. Input
+
 - `description`: Short task description (3-5 words).
 - `prompt`: Instructions for the sub-agent.
 - `subagent_type`: Sub-agent type.
@@ -8,6 +9,7 @@
 - `command`: Command that triggered the task (optional).
 
 ## 2. Output
+
 - `title`: The task description.
 - `output`: Text containing `task_id` and a `<task_result>` block.
 - `metadata.sessionId`: Sub-agent session ID.
@@ -20,6 +22,7 @@
 - `metadata.summary[].state.title`: Completion title (if any).
 
 ## 3. JSON Example
+
 ```json
 {
   "description": "Explore API handlers",
@@ -29,5 +32,6 @@
 ```
 
 ## 4. Notes
+
 - Passing `task_id` continues an existing sub-session.
 - `todowrite` and `todoread` are not allowed in sub-agent sessions.
