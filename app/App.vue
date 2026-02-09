@@ -9128,7 +9128,7 @@ function upsertToolEntry(
           scroll: false,
           scrollDistance,
           scrollDuration,
-    scrollDelay: 0.15,
+          scrollDelay: 0.10,
           html: '',
           isWrite: entry.isWrite,
           isMessage: false,
