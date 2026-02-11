@@ -46,6 +46,7 @@
                 @revert-message="handleRevertMessage"
                 @show-message-diff="handleShowMessageDiff"
                 @show-message-history="handleShowMessageHistory"
+                @open-image="handleOpenImage"
               />
               <SidePanel
                 class="todo-panel"
@@ -156,6 +157,7 @@ import { bundledThemes } from 'shiki/bundle/web';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import InputPanel from './components/InputPanel.vue';
+import ImageViewer from './components/ImageViewer.vue';
 import OutputPanel from './components/OutputPanel.vue';
 import ProjectPicker from './components/ProjectPicker.vue';
 import hexdump from '@kikuchan/hexdump';
@@ -6893,6 +6895,32 @@ function handleShowMessageHistory(payload: { roundId: string; contents: string[]
     y: pos.y,
     width: FILE_VIEWER_WINDOW_WIDTH,
     height: FILE_VIEWER_WINDOW_HEIGHT,
+    expiry: Infinity,
+  });
+}
+
+function handleOpenImage(payload: { url: string; filename: string }) {
+  const { url, filename } = payload;
+  const key = `image-viewer:${url}`;
+  if (fw.has(key)) {
+    fw.bringToFront(key);
+    return;
+  }
+  const pos = getFileViewerPosition();
+  fw.open(key, {
+    component: ImageViewer,
+    props: {
+      src: url,
+      alt: filename,
+    },
+    closable: true,
+    resizable: true,
+    scroll: 'manual',
+    title: filename || 'Image',
+    x: pos.x,
+    y: pos.y,
+    width: 800,
+    height: 600,
     expiry: Infinity,
   });
 }

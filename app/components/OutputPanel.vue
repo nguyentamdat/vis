@@ -30,14 +30,32 @@
                 <template v-for="(group, gi) in groupRoundMessages(q)" :key="gi">
                   <template v-if="group.role === 'user'">
                     <div class="ib-msg-block ib-msg-user">
-                      <MessageViewer
+                      <div
                         v-for="(msg, mi) in group.messages"
                         :key="msg.messageId ?? mi"
-                        :code="msg.content"
-                        :lang="'markdown'"
-                        :theme="theme"
-                        @rendered="handleMessageRendered"
-                      />
+                        class="ib-msg-row"
+                      >
+                        <MessageViewer
+                          :code="msg.content"
+                          :lang="'markdown'"
+                          :theme="theme"
+                          @rendered="handleMessageRendered"
+                        />
+                        <div
+                          v-if="msg.attachments && msg.attachments.length > 0"
+                          class="output-entry-attachments"
+                        >
+                          <img
+                            v-for="item in msg.attachments"
+                            :key="item.id"
+                            class="output-entry-attachment clickable"
+                            :src="item.url"
+                            :alt="item.filename"
+                            loading="lazy"
+                            @click="$emit('open-image', { url: item.url, filename: item.filename })"
+                          />
+                        </div>
+                      </div>
                     </div>
                   </template>
                 </template>
@@ -149,10 +167,11 @@
                   <img
                     v-for="item in q.attachments"
                     :key="item.id"
-                    class="output-entry-attachment"
+                    class="output-entry-attachment clickable"
                     :src="item.url"
                     :alt="item.filename"
                     loading="lazy"
+                    @click="$emit('open-image', { url: item.url, filename: item.filename })"
                   />
                 </div>
               </div>
@@ -339,6 +358,7 @@ const emit = defineEmits<{
     },
   ): void;
   (event: 'show-message-history', payload: { roundId: string; contents: string[] }): void;
+  (event: 'open-image', payload: { url: string; filename: string }): void;
 }>();
 
 const filteredQueue = computed(() =>
@@ -913,6 +933,10 @@ defineExpose({ panelEl });
   background: #0b1320;
 }
 
+.output-entry-attachment.clickable {
+  cursor: pointer;
+}
+
 .output-entry-inner.is-scrolling {
   animation: scroll-down var(--scroll-duration) linear forwards;
 }
@@ -1016,6 +1040,12 @@ defineExpose({ panelEl });
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.ib-msg-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .ib-msg-user {
