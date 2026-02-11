@@ -513,7 +513,7 @@ const inputResizeState = ref<{
   maxHeight: number;
 } | null>(null);
 const inputHeight = ref<number | null>(null);
-let nextWindowZIndex = 20;
+let nextWindowZIndex = 10000;
 let sessionStatusRequestId = 0;
 let primaryHistoryRequestId = 0;
 const messageIndexById = new Map<string, number>();
