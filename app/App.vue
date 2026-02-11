@@ -1212,9 +1212,50 @@ function applyComposerDraftToComposerState(draft: ComposerDraft, contextKey: str
   composerDraftRevisionByContext.set(contextKey, draft.rev);
   messageInput.value = draft.messageInput;
   attachments.value = draft.attachments.slice();
-  if (draft.agent) selectedMode.value = draft.agent;
-  if (draft.model) selectedModel.value = draft.model;
-  selectedThinking.value = draft.variant;
+  
+  // Bootstrap guard: if options not loaded yet, apply draft values as-is
+  if (agentOptions.value.length === 0 || modelOptions.value.length === 0) {
+    if (draft.agent) selectedMode.value = draft.agent;
+    if (draft.model) selectedModel.value = draft.model;
+    selectedThinking.value = draft.variant;
+    return;
+  }
+  
+  // Validate and apply agent
+  let agentToApply = draft.agent;
+  if (draft.agent && !agentOptions.value.some((o) => o.id === draft.agent)) {
+    // Agent not found, fall back to defaults
+    const defaults = resolveDefaultAgentModel();
+    agentToApply = defaults.agent;
+  } else if (draft.agent) {
+    agentToApply = draft.agent;
+    selectedMode.value = agentToApply;
+  }
+  
+  // Apply agent defaults to get correct model and variant
+  if (agentToApply) {
+    selectedMode.value = agentToApply;
+    applyAgentDefaults(agentToApply);
+  }
+  
+  // Validate and apply model
+  if (draft.model && modelOptions.value.some((m) => m.id === draft.model)) {
+    // Model is valid, use it
+    selectedModel.value = draft.model;
+  } else if (draft.model) {
+    // Model not found, fall back to agent's default or first available
+    if (!selectedModel.value && modelOptions.value.length > 0) {
+      selectedModel.value = modelOptions.value[0].id;
+    }
+  }
+  
+  // Validate and apply variant
+  if (draft.variant && thinkingOptions.value.includes(draft.variant)) {
+    selectedThinking.value = draft.variant;
+  } else if (draft.variant) {
+    // Variant not found, use first available
+    selectedThinking.value = thinkingOptions.value[0];
+  }
 }
 
 function restoreComposerDraftForContext(contextKey: string) {
@@ -1277,6 +1318,38 @@ function applyAgentDefaults(agentName: string) {
       }
     }
   }
+}
+
+function resolveDefaultAgentModel(): { agent: string; model: string; variant: string | undefined } {
+  // Determine the default agent: prefer 'build' if it exists, otherwise use first available
+  const defaultAgent = agentOptions.value.find((o) => o.id === 'build')?.id ?? agentOptions.value[0]?.id ?? '';
+  
+  // Set the agent and apply its defaults (model + variant)
+  selectedMode.value = defaultAgent;
+  applyAgentDefaults(defaultAgent);
+  
+  // If model is still empty after applyAgentDefaults, fall back to provider default or first model
+  if (!selectedModel.value && modelOptions.value.length > 0) {
+    // Try to find a model from provider defaults
+    const providers_data = providers.value;
+    const defaults = providers_data.length > 0 ? (providers_data[0] as any)?.default ?? {} : {};
+    const preferredModelId = Object.entries(defaults)
+      .map(([providerID, modelID]) => {
+        const match = modelOptions.value.find(
+          (m) => m.providerID === providerID && m.modelID === modelID,
+        );
+        return match?.id;
+      })
+      .find((id) => Boolean(id));
+    
+    selectedModel.value = preferredModelId || modelOptions.value[0]?.id || '';
+  }
+  
+  return {
+    agent: selectedMode.value,
+    model: selectedModel.value,
+    variant: selectedThinking.value,
+  };
 }
 
 function handleSelectedModeUpdate(value: string) {
