@@ -1,3 +1,5 @@
+import MarkdownIt from 'markdown-it';
+import { fromHighlighter } from '@shikijs/markdown-it/core';
 import { bundledLanguages, createHighlighter } from 'shiki/bundle/web';
 
 type RenderRequest = {
@@ -710,6 +712,30 @@ async function renderCodeHtml(request: RenderRequest) {
   return buildHtmlFromRows(buildCodeRows(lines, mode, gutterLines));
 }
 
+let cachedMd: MarkdownIt | null = null;
+let cachedMdTheme = '';
+
+function getMarkdownIt(highlighter: Awaited<ReturnType<typeof createHighlighter>>, theme: string) {
+  if (!cachedMd || cachedMdTheme !== theme) {
+    cachedMdTheme = theme;
+    cachedMd = new MarkdownIt({ html: true, linkify: true });
+    cachedMd.use(
+      fromHighlighter(highlighter, {
+        theme,
+        defaultLanguage: 'text',
+      }),
+    );
+  }
+  return cachedMd;
+}
+
+async function renderMarkdownHtml(request: RenderRequest): Promise<string> {
+  const highlighter = await getHighlighter(request.theme);
+  const md = getMarkdownIt(highlighter, request.theme);
+  const rendered = md.render(request.code);
+  return `<div class="markdown-host">${rendered}</div>`;
+}
+
 function renderRequest(request: RenderRequest): Promise<string> {
   if (request.patch) {
     const after = request.after ?? applyPatchToCode(request.code, request.patch);
@@ -742,6 +768,15 @@ function renderRequest(request: RenderRequest): Promise<string> {
     const mode = request.gutterMode ?? 'single';
     const rows = renderGrepRows(request.code, mode, request.gutterLines, request.grepPattern);
     return Promise.resolve(buildHtmlFromRows(rows));
+  }
+
+  // Markdown rendering for messages (gutterMode: 'none' only)
+  const resolvedLang = languageCandidates(request.lang)[0] ?? 'text';
+  if (
+    (resolvedLang === 'markdown' || resolvedLang === 'md') &&
+    request.gutterMode === 'none'
+  ) {
+    return renderMarkdownHtml(request);
   }
 
   return renderCodeHtml(request);

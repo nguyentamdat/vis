@@ -146,4 +146,145 @@ onBeforeUnmount(() => {
 .message-content :deep(.grep-match strong) {
   font-weight: inherit;
 }
+
+/* markdown-it rendered content */
+.message-content :deep(.markdown-host) {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-content :deep(.markdown-host) > *:first-child {
+  margin-top: 0;
+}
+
+.message-content :deep(.markdown-host) > *:last-child {
+  margin-bottom: 0;
+}
+
+.message-content :deep(.markdown-host h1),
+.message-content :deep(.markdown-host h2),
+.message-content :deep(.markdown-host h3),
+.message-content :deep(.markdown-host h4),
+.message-content :deep(.markdown-host h5),
+.message-content :deep(.markdown-host h6) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #e2e8f0;
+}
+
+.message-content :deep(.markdown-host h1) { font-size: 1.4em; }
+.message-content :deep(.markdown-host h2) { font-size: 1.25em; }
+.message-content :deep(.markdown-host h3) { font-size: 1.1em; }
+.message-content :deep(.markdown-host h4) { font-size: 1em; }
+
+.message-content :deep(.markdown-host p) {
+  margin: 0.5em 0;
+}
+
+.message-content :deep(.markdown-host a) {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-decoration-color: rgba(96, 165, 250, 0.4);
+  text-underline-offset: 2px;
+}
+
+.message-content :deep(.markdown-host a:hover) {
+  text-decoration-color: #60a5fa;
+}
+
+.message-content :deep(.markdown-host ul),
+.message-content :deep(.markdown-host ol) {
+  margin: 0.4em 0;
+  padding-left: 1.6em;
+}
+
+.message-content :deep(.markdown-host li) {
+  margin: 0.15em 0;
+}
+
+.message-content :deep(.markdown-host li > p) {
+  margin: 0.2em 0;
+}
+
+.message-content :deep(.markdown-host blockquote) {
+  margin: 0.5em 0;
+  padding: 0.2em 0.8em;
+  border-left: 3px solid #64748b;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.message-content :deep(.markdown-host table) {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+  font-size: 0.95em;
+}
+
+.message-content :deep(.markdown-host th),
+.message-content :deep(.markdown-host td) {
+  border: 1px solid #334155;
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+
+.message-content :deep(.markdown-host th) {
+  background: rgba(51, 65, 85, 0.4);
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.message-content :deep(.markdown-host tr:nth-child(even)) {
+  background: rgba(51, 65, 85, 0.15);
+}
+
+.message-content :deep(.markdown-host hr) {
+  border: none;
+  border-top: 1px solid #334155;
+  margin: 0.8em 0;
+}
+
+.message-content :deep(.markdown-host code) {
+  display: inline;
+  background: rgba(51, 65, 85, 0.5);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.message-content :deep(.markdown-host pre) {
+  margin: 0.5em 0;
+  padding: 0.6em 0.8em;
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.message-content :deep(.markdown-host pre code) {
+  display: block;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  white-space: pre;
+}
+
+.message-content :deep(.markdown-host img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.message-content :deep(.markdown-host strong) {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.message-content :deep(.markdown-host em) {
+  font-style: italic;
+}
 </style>
