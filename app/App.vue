@@ -504,6 +504,7 @@ function handleOutputPanelInitialRenderComplete() {
           scrollOutputPanelToBottom(false);
         });
         resumeOutputPanelTracking({ syncToBottom: true });
+        syncFloatingExtent();
       });
     });
   });
