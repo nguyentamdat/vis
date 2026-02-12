@@ -1,15 +1,16 @@
 <template>
   <aside class="side-panel" :class="{ 'is-collapsed': collapsed }">
     <button
+      v-if="collapsed"
       type="button"
-      class="side-toggle"
+      class="side-toggle side-toggle-collapsed"
       :aria-expanded="String(!collapsed)"
-      :aria-label="collapsed ? 'Expand side panel' : 'Collapse side panel'"
+      aria-label="Expand side panel"
       @click="emit('toggle-collapse')"
     >
-      {{ collapsed ? '<' : '>' }}
+      <Icon icon="lucide:chevron-left" width="14" height="14" />
     </button>
-    <div v-if="!collapsed" class="side-body">
+    <div v-else class="side-body">
       <div class="side-tabs">
         <button
           v-for="tab in tabs"
@@ -20,6 +21,15 @@
           @click="emit('change-tab', tab.id)"
         >
           {{ tab.label }}
+        </button>
+        <button
+          type="button"
+          class="side-toggle side-toggle-inline"
+          :aria-expanded="String(!collapsed)"
+          aria-label="Collapse side panel"
+          @click="emit('toggle-collapse')"
+        >
+          <Icon icon="lucide:chevron-right" width="14" height="14" />
         </button>
       </div>
       <TodoList v-if="activeTab === 'todo'" :sessions="todoSessions" />
@@ -41,7 +51,8 @@
 </template>
 
 <script setup lang="ts">
-import { toRefs } from 'vue';
+ import { toRefs } from 'vue';
+ import { Icon } from '@iconify/vue';
 import TodoList from './TodoList.vue';
 import TreeView, { type TreeNode } from './TreeView.vue';
 
@@ -119,13 +130,18 @@ const {
 }
 
 .side-toggle {
-  width: 30px;
-  border: 0;
-  border-right: 1px solid rgba(100, 116, 139, 0.45);
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(100, 116, 139, 0.45);
+  border-radius: 6px;
   background: rgba(30, 41, 59, 0.92);
   color: #cbd5e1;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .side-toggle:hover {
@@ -142,6 +158,7 @@ const {
 
 .side-tabs {
   display: flex;
+  align-items: center;
   gap: 4px;
   padding: 8px;
   border-bottom: 1px solid rgba(71, 85, 105, 0.42);
@@ -170,8 +187,14 @@ const {
   border-color: rgba(100, 116, 139, 0.45);
 }
 
-.side-panel.is-collapsed .side-toggle {
+.side-toggle-inline {
+  margin-left: auto;
+}
+
+.side-toggle-collapsed {
   width: 100%;
-  border-right: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
 }
 </style>

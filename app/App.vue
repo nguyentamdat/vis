@@ -68,14 +68,14 @@
               />
             </div>
             <div ref="toolWindowCanvasEl" class="tool-window-canvas">
-              <TransitionGroup appear name="fade">
+              <TransitionGroup appear name="scale">
                 <FloatingWindow
                   v-for="entry in fw.entries.value"
                   :key="entry.key"
                   :entry="entry"
                   :manager="fw"
                   @focus="fw.bringToFront(entry.key)"
-                  @close="fw.close(entry.key)"
+                  @close="handleFloatingWindowClose(entry.key)"
                 />
               </TransitionGroup>
             </div>
@@ -468,6 +468,18 @@ const {
   isFollowing,
   followThresholdPx: FOLLOW_THRESHOLD_PX,
 });
+
+function forceFollowScroll() {
+  isFollowing.value = true;
+  nextTick(() => {
+    scrollToBottom();
+    updateFollowState();
+    requestAnimationFrame(() => {
+      scrollToBottom();
+      updateFollowState();
+    });
+  });
+}
 const runningToolIds = reactive(new Set<string>());
 const subagentSessionExpiry = new Map<string, number>();
 const messageSummaryTitleById = new Map<string, string>();
@@ -533,6 +545,9 @@ const composerDraftTabId =
 const shellSessionsByPtyId = new Map<string, ShellSession>();
 const shellPtyIdsBySessionId = new Map<string, Set<string>>();
 const pendingShellFits = new Map<string, number>();
+const ptyMetaDecoder = new TextDecoder();
+let floatingExtentResizeObserver: ResizeObserver | null = null;
+let floatingExtentObservedEl: HTMLDivElement | null = null;
 const pendingToolScrollFrames = new Map<string, number>();
 const permissionSendingById = ref<Record<string, boolean>>({});
 const permissionErrorById = ref<Record<string, string>>({});
@@ -1177,6 +1192,7 @@ function toggleSidePanelCollapsed() {
   sidePanelCollapsed.value = !sidePanelCollapsed.value;
   persistSidePanelCollapsed(sidePanelCollapsed.value);
   nextTick(() => {
+    syncFloatingExtent();
     scheduleShellFitAll();
   });
 }
@@ -1296,8 +1312,13 @@ function clearComposerDraftForCurrentContext() {
 }
 
 function pruneOrphanedComposerDrafts() {
+  // Disabled: session graph may be incomplete, causing false-positive draft deletion.
+  // Re-enable after session graph construction is fully reliable.
+  return;
+  if (!bootstrapReady.value) return;
   const store = readComposerDraftStore();
   const knownSessionIDs = sessionGraphStore.getKnownSessionIDs();
+  if (knownSessionIDs.size === 0) return;
   const currentContextKey = draftKeyForSelectedContext();
   const cleaned: Record<string, ComposerDraft> = {};
 
@@ -1601,14 +1622,14 @@ function syncSessionStatuses(entries: [string, SessionStatusType][], projectId?:
   const apiBusyKeys = new Set<string>();
   let didUpdate = false;
 
-  // Apply API entries: always update status, and collect keys reported as busy
+  // Apply API entries: merge missing, and collect keys reported as busy
   entries.forEach(([sessionId, status]) => {
     if (!sessionId) return;
     const key = buildSessionStatusKeyForSession(sessionId, projectId);
     if (!key) return;
     apiBusyKeys.add(key);
     const current = sessionStatusByKey.get(key);
-    if (current !== status) {
+    if (current === undefined) {
       sessionStatusByKey.set(key, status);
       didUpdate = true;
     }
@@ -1689,6 +1710,24 @@ function syncFloatingExtent() {
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
   fw.setExtent(rect.width, rect.height);
+}
+
+function updateFloatingExtentObserver() {
+  if (typeof ResizeObserver === 'undefined') return;
+  if (!floatingExtentResizeObserver) {
+    floatingExtentResizeObserver = new ResizeObserver(() => {
+      syncFloatingExtent();
+    });
+  }
+  const nextEl = toolWindowCanvasEl.value;
+  if (floatingExtentObservedEl && floatingExtentObservedEl !== nextEl) {
+    floatingExtentResizeObserver.unobserve(floatingExtentObservedEl);
+  }
+  if (nextEl && nextEl !== floatingExtentObservedEl) {
+    floatingExtentResizeObserver.observe(nextEl);
+  }
+  floatingExtentObservedEl = nextEl ?? null;
+  if (nextEl) syncFloatingExtent();
 }
 
 function bringToFront(entry: FileReadEntry) {
@@ -2164,6 +2203,7 @@ function handlePointerMove(event: PointerEvent) {
     const { startY, startHeight, minHeight, maxHeight } = inputResizeState.value;
     const dy = event.clientY - startY;
     inputHeight.value = clamp(startHeight - dy, minHeight, maxHeight);
+    syncFloatingExtent();
     scheduleShellFitAll();
     return;
   }
@@ -2362,7 +2402,10 @@ function scheduleToolScrollAnimation(toolKey: string) {
 
 function syncVisibleSessionsFromGraph() {
   const directory = activeDirectory.value.trim();
-  const projectID = selectedProjectId.value || sessionGraphStore.resolveProjectIDForDirectory(directory);
+  const projectID =
+    resolveProjectIdForDirectorySelection(directory || undefined)
+    || selectedProjectId.value
+    || sessionGraphStore.resolveProjectIDForDirectory(directory);
   if (projectID && selectedProjectId.value !== projectID) selectedProjectId.value = projectID;
   sessions.value = sessionGraphStore.getRootSessions({
     projectID: projectID || undefined,
@@ -2392,13 +2435,19 @@ function resolveProjectIdForDirectorySelection(directory?: string) {
   return matched?.id ?? '';
 }
 
-function setSessions(list: SessionInfo[]) {
+function setSessions(list: SessionInfo[], directoryContext?: string) {
   const next = Array.isArray(list) ? list : [];
+  const contextDirectory = (directoryContext ?? activeDirectory.value ?? '').trim();
   const projectID =
-    selectedProjectId.value || resolveProjectIdForDirectorySelection(activeDirectory.value || undefined);
+    resolveProjectIdForDirectorySelection(contextDirectory || undefined)
+    || selectedProjectId.value
+    || sessionGraphStore.resolveProjectIDForDirectory(contextDirectory);
+  if (projectID && contextDirectory) {
+    sessionGraphStore.rememberProjectDirectory(projectID, contextDirectory);
+  }
   sessionGraphStore.upsertSessions(next, {
     projectIDHint: projectID || undefined,
-    directoryHint: activeDirectory.value || undefined,
+    directoryHint: contextDirectory || undefined,
     retention: 'persistent',
   });
   syncVisibleSessionsFromGraph();
@@ -2547,6 +2596,7 @@ async function fetchSessions(
     limit?: number;
   } = {},
 ) {
+  const contextDirectory = options.instanceDirectory ?? options.directory ?? activeDirectory.value;
   const list = await listSessionsByDirectory(options);
   if (options.instanceDirectory && selectedWorktreeDir.value) {
     if (normalizeDirectory(options.instanceDirectory) !== normalizeDirectory(selectedWorktreeDir.value)) {
@@ -2556,7 +2606,7 @@ async function fetchSessions(
   if (options.directory && selectedWorktreeDir.value && options.directory !== selectedWorktreeDir.value) {
     return;
   }
-  setSessions(list);
+  setSessions(list, contextDirectory);
 }
 
 async function listSessionsByDirectory(
@@ -3137,7 +3187,8 @@ async function fetchSessionStatus(directory?: string) {
       }
     });
     const resolvedProjectId =
-      selectedProjectId.value || resolveProjectIdForDirectorySelection(directoryAtRequest || undefined);
+      resolveProjectIdForDirectorySelection(directoryAtRequest || undefined)
+      || selectedProjectId.value;
     if (resolvedProjectId) {
       syncSessionStatuses(nextEntries, resolvedProjectId);
     }
@@ -4018,7 +4069,11 @@ async function fetchHistory(sessionId: string, isSubagentMessage = false) {
       messageDiffsByKey.set(messageKey, roundDiffs);
     }
 
-    scheduleFollowScroll();
+    if (!isSubagentMessage) {
+      forceFollowScroll();
+    } else {
+      scheduleFollowScroll();
+    }
   } catch (error) {
     log('History load failed', error);
   }
@@ -4161,10 +4216,43 @@ function connectShellSocket(ptyId: string) {
   session.socket = socket;
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('message', (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      const bytes = new Uint8Array(event.data);
+      if (bytes.length > 0 && bytes[0] === 0) {
+        const json = ptyMetaDecoder.decode(bytes.subarray(1));
+        try {
+          const meta = JSON.parse(json) as { cursor?: unknown };
+          if (typeof meta.cursor === 'number' && Number.isSafeInteger(meta.cursor) && meta.cursor >= 0) {
+            return;
+          }
+        } catch {
+          return;
+        }
+        return;
+      }
+      session.terminal.write(bytes);
+      return;
+    }
     if (typeof event.data === 'string') {
+      const trimmed = event.data.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          const meta = JSON.parse(trimmed) as { cursor?: unknown } & Record<string, unknown>;
+          const keys = Object.keys(meta);
+          if (
+            keys.length === 1
+            && keys[0] === 'cursor'
+            && typeof meta.cursor === 'number'
+            && Number.isSafeInteger(meta.cursor)
+            && meta.cursor >= 0
+          ) {
+            return;
+          }
+        } catch {
+          // fall through to terminal output
+        }
+      }
       session.terminal.write(event.data);
-    } else if (event.data instanceof ArrayBuffer) {
-      session.terminal.write(new Uint8Array(event.data));
     }
   });
   socket.addEventListener('open', () => {
@@ -4189,6 +4277,15 @@ function removeShellWindow(ptyId: string, options: { preserve?: boolean } = {}) 
   shellSessionsByPtyId.delete(ptyId);
   fw.close(`shell:${ptyId}`);
   if (!options.preserve) removeShellPtyId(session.sessionId, ptyId);
+}
+
+function handleFloatingWindowClose(key: string) {
+  if (key.startsWith('shell:')) {
+    const ptyId = key.slice('shell:'.length);
+    removeShellWindow(ptyId, { preserve: false });
+    return;
+  }
+  void fw.close(key);
 }
 
 function disposeShellWindows(options: { preserve?: boolean } = {}) {
@@ -5735,6 +5832,14 @@ watch(
 );
 
 watch(
+  () => toolWindowCanvasEl.value,
+  () => {
+    updateFloatingExtentObserver();
+  },
+  { immediate: true },
+);
+
+watch(
   selectedProjectDirectory,
   (directory, previous) => {
     if (directory === previous) return;
@@ -5779,23 +5884,14 @@ watch(
     if (typeof previous === 'undefined') return;
     if (isBootstrapping.value) return;
     selectedSessionId.value = '';
-    const directory = value.trim();
-    if (selectedProjectId.value && directory) {
-      sessionGraphStore.rememberProjectDirectory(selectedProjectId.value, directory);
-    }
-    registerProjectDirectories();
     const resolvedProjectId = resolveProjectIdForDirectorySelection(value || undefined);
-    if (resolvedProjectId) {
-      selectedProjectId.value = resolvedProjectId;
-      if (directory) sessionGraphStore.rememberProjectDirectory(resolvedProjectId, directory);
-    }
+    selectedProjectId.value = resolvedProjectId || '';
     if (!selectedProjectId.value && value) {
       void fetchCurrentProject(value).then((project) => {
         if (!project?.id) return;
         upsertProject(project);
         if (selectedWorktreeDir.value === value) {
           selectedProjectId.value = project.id;
-          if (directory) sessionGraphStore.rememberProjectDirectory(project.id, directory);
           syncVisibleSessionsFromGraph();
         }
       });
@@ -5835,6 +5931,18 @@ watch(
     if (!isValid) {
       if (preferredId) selectedSessionId.value = preferredId;
     }
+  },
+  { immediate: true },
+);
+
+watch(
+  uiInitState,
+  (state) => {
+    if (state !== 'ready') return;
+    nextTick(() => {
+      forceFollowScroll();
+      syncFloatingExtent();
+    });
   },
   { immediate: true },
 );
@@ -6298,20 +6406,20 @@ async function renderReadHtmlFromApi(params: {
       lineOffset: params.lineOffset,
       lineLimit: params.lineLimit,
     });
-   } catch (error) {
-     if (params.fallbackText) {
-       return renderWorkerHtml({
-         id: `read-${params.callId ?? 'unknown'}-${Date.now().toString(36)}`,
-         code: params.fallbackText,
-         lang: params.lang,
-         theme: 'github-dark',
-         gutterMode: 'single',
-         lineOffset: params.lineOffset,
-         lineLimit: params.lineLimit,
-       });
-     }
-     return renderText(`Failed to load: ${params.path ?? 'unknown file'}`);
-   }
+  } catch (error) {
+    if (params.fallbackText) {
+      return renderWorkerHtml({
+        id: `read-${params.callId ?? 'unknown'}-${Date.now().toString(36)}`,
+        code: params.fallbackText,
+        lang: params.lang,
+        theme: 'github-dark',
+        gutterMode: 'single',
+        lineOffset: params.lineOffset,
+        lineLimit: params.lineLimit,
+      });
+    }
+    return renderText(`Failed to load: ${params.path ?? 'unknown file'}`);
+  }
 }
 
 function renderEditDiffHtml(params: {
@@ -10400,6 +10508,7 @@ onMounted(() => {
   window.addEventListener('pointerup', handlePointerUp);
   window.addEventListener('resize', handleWindowResize);
   window.addEventListener('storage', handleComposerDraftStorage);
+  updateFloatingExtentObserver();
   unregisterSessionStatusGlobalHook?.();
   unregisterSessionStatusGlobalHook = registerGlobalEventHook((payload, eventType) => {
     const normalized = normalizeEventType(eventType);
@@ -10417,6 +10526,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('pointerup', handlePointerUp);
   window.removeEventListener('resize', handleWindowResize);
   window.removeEventListener('storage', handleComposerDraftStorage);
+  floatingExtentResizeObserver?.disconnect();
+  floatingExtentResizeObserver = null;
+  floatingExtentObservedEl = null;
   pendingToolScrollFrames.forEach((frame) => {
     cancelAnimationFrame(frame);
   });
@@ -10628,14 +10740,15 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: all 0.15s ease-in;
+:deep(.scale-enter-active),
+:deep(.scale-leave-active) {
+  transition: transform 0.15s ease-in, opacity 0.15s ease-in;
 }
 
-.fade-enter-from,
-.fade-leave-to {
+:deep(.scale-enter-from),
+:deep(.scale-leave-to) {
   opacity: 0;
-  transform: scaleX(150%) scaleY(0%);
+  --win-scale-x: 1.5;
+  --win-scale-y: 0;
 }
 </style>
