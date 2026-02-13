@@ -20,7 +20,7 @@ const windowEl = ref<HTMLElement>();
 const bodyEl = ref<HTMLElement>();
 
 const scrollMode = computed<ScrollMode>(() => props.entry.scroll || 'manual');
-const { showResumeButton, resumeFollow } = useScrollFollow(bodyEl, scrollMode);
+const { showResumeButton, resumeFollow, notifyContentChange } = useScrollFollow(bodyEl, scrollMode);
 
 watch(
   () => props.entry.resolvedHtml,
@@ -30,6 +30,7 @@ watch(
     const saved = el.scrollTop;
     nextTick(() => {
       el.scrollTop = saved;
+      notifyContentChange();
     });
   },
   { flush: 'pre' },

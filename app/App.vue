@@ -462,9 +462,9 @@ const {
   isFollowing,
   pauseTracking: pauseOutputPanelTracking,
   resumeTracking: resumeOutputPanelTracking,
-  runWithoutTracking: runWithoutOutputPanelTracking,
   resumeFollow,
   scrollToBottom: scrollOutputPanelToBottom,
+  notifyContentChange,
 } = useScrollFollow(outputPanelContainerEl, outputPanelScrollMode, {
   bottomThresholdPx: FOLLOW_THRESHOLD_PX,
   observeDelayMs: 0,
@@ -477,68 +477,22 @@ const outputPanelInitialFollowPending = ref(true);
 pauseOutputPanelTracking();
 
 function scheduleFollowScroll(reason = 'unspecified') {
-  const panel = outputPanelContainerEl.value;
   followDebug('scheduleFollowScroll:request', {
     reason,
     trackingPaused: isOutputPanelTrackingPaused.value,
     isFollowing: isFollowing.value,
-    queueLength: queue.value.length,
-    scrollTop: panel?.scrollTop,
-    scrollHeight: panel?.scrollHeight,
-    clientHeight: panel?.clientHeight,
   });
-  if (isOutputPanelTrackingPaused.value) {
-    followDebug('scheduleFollowScroll:skip-paused', { reason });
-    return;
-  }
-  if (!isFollowing.value) {
-    followDebug('scheduleFollowScroll:skip-not-following', { reason });
-    return;
-  }
-  nextTick(() => {
-    if (isOutputPanelTrackingPaused.value) {
-      followDebug('scheduleFollowScroll:nextTick-skip-paused', { reason });
-      return;
-    }
-    if (!isFollowing.value) {
-      followDebug('scheduleFollowScroll:nextTick-skip-not-following', { reason });
-      return;
-    }
-    followDebug('scheduleFollowScroll:nextTick-scroll', { reason });
-    scrollOutputPanelToBottom(false);
-  });
+  notifyContentChange();
 }
 
 function handleOutputPanelInitialRenderComplete() {
-  followDebug('initialRenderComplete:start', {
-    pending: outputPanelInitialFollowPending.value,
-  });
   if (!outputPanelInitialFollowPending.value) return;
   outputPanelInitialFollowPending.value = false;
-  runWithoutOutputPanelTracking(() => {
-    followDebug('initialRenderComplete:resumeFollow');
-    resumeFollow(false);
-  });
+  resumeFollow(false);
   nextTick(() => {
-    runWithoutOutputPanelTracking(() => {
-      followDebug('initialRenderComplete:scroll-1');
-      scrollOutputPanelToBottom(false);
-    });
-    requestAnimationFrame(() => {
-      runWithoutOutputPanelTracking(() => {
-        followDebug('initialRenderComplete:scroll-2');
-        scrollOutputPanelToBottom(false);
-      });
-      requestAnimationFrame(() => {
-        runWithoutOutputPanelTracking(() => {
-          followDebug('initialRenderComplete:scroll-3');
-          scrollOutputPanelToBottom(false);
-        });
-        followDebug('initialRenderComplete:resumeTracking');
-        resumeOutputPanelTracking({ syncToBottom: true });
-        syncFloatingExtent();
-      });
-    });
+    scrollOutputPanelToBottom(false);
+    resumeOutputPanelTracking({ syncToBottom: true });
+    syncFloatingExtent();
   });
 }
 
