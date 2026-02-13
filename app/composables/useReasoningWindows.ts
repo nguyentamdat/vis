@@ -1,6 +1,7 @@
 import { nextTick, onUnmounted, type Ref } from 'vue';
 import type { MessagePartUpdatedPacket, MessageUpdatedPacket } from '../types/sse';
 import type { SessionScope } from './useGlobalEvents';
+import { renderWorkerHtml } from '../utils/workerRenderer';
 
 export type ReasoningFinish = {
   id: string;
@@ -13,6 +14,10 @@ type FileReadEntry = {
   isReasoning?: boolean;
   sessionId?: string;
   expiresAt: number;
+  content?: string;
+  html?: string;
+  x?: number;
+  y?: number;
   [key: string]: unknown;
 };
 
@@ -34,6 +39,10 @@ export function useReasoningWindows(options: {
 
   function getReasoningKey(sessionId?: string) {
     return sessionId ?? selectedSessionId.value ?? 'main';
+  }
+
+  function getMessageKey(messageId: string, sessionId?: string) {
+    return `${sessionId || 'main'}:${messageId}`;
   }
 
   function getReasoningFinish(reasoningKey: string, messageId?: string) {
@@ -159,6 +168,52 @@ export function useReasoningWindows(options: {
 
         activeReasoningMessageIdByKey.set(reasoningKey, messageId);
         lastReasoningMessageIdByKey.set(reasoningKey, messageId);
+
+        const messageKey = getMessageKey(messageId, resolvedSessionId);
+        let entry = queue.value.find((e) => e.messageKey === messageKey);
+
+        if (!entry) {
+          const { x, y } = (() => {
+            const el = toolWindowCanvasEl.value;
+            const w = el?.clientWidth || window.innerWidth;
+            const h = el?.clientHeight || window.innerHeight;
+            const targetW = 600;
+            const targetH = 400;
+            const maxX = Math.max(0, w - targetW - 20);
+            const maxY = Math.max(0, h - targetH - 20);
+            return {
+              x: 20 + Math.floor(Math.random() * maxX),
+              y: 20 + Math.floor(Math.random() * maxY),
+            };
+          })();
+
+          entry = {
+            messageKey,
+            sessionId: resolvedSessionId,
+            isReasoning: true,
+            expiresAt: Number.MAX_SAFE_INTEGER,
+            content: part.text || '',
+            html: '',
+            time: Date.now(),
+            follow: true,
+            x,
+            y,
+          };
+          queue.value.push(entry);
+        } else {
+          entry.content = part.text || '';
+        }
+
+        if (entry.content) {
+          renderWorkerHtml({
+            id: `reasoning-${messageId}`,
+            code: entry.content,
+            lang: 'markdown',
+            theme: 'dark-plus',
+          }).then((html) => {
+            if (entry) entry.html = html;
+          });
+        }
 
         if (part.time?.end) {
           markReasoningFinished(resolvedSessionId, messageId);
