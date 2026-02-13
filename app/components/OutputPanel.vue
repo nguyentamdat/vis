@@ -1023,7 +1023,6 @@ defineExpose({ panelEl });
   border: 1px solid #1e293b;
   border-radius: 8px;
   background: #020617;
-  overflow: hidden;
 }
 
 .history-item.is-latest {

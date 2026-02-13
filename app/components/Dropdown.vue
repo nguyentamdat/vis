@@ -277,7 +277,7 @@ provide('x-selectable', api);
   margin-top: 6px;
   width: anchor-size(width);
   max-width: calc(100vw - 16px);
-  max-height: min(280px, calc(100vh - anchor(bottom) - 14px));
+  max-height: 60vh;
   position-try-fallbacks: flip-block;
   background: rgba(2, 6, 23, 0.98);
   border: 1px solid #334155;
