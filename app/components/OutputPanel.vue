@@ -74,15 +74,16 @@
                 {{ formatRoundTargetLabel(q) }}
               </div>
 
-              <!-- Assistant response area (no collapse, fade transition per message) -->
-              <div v-if="hasAssistantMessages(q)" class="ib-response-area">
-                <template v-for="(group, gi) in groupRoundMessages(q)" :key="gi">
-                  <template v-if="group.role === 'assistant'">
-                    <Transition name="ib-fade" mode="out-in">
-                      <div
-                        class="ib-msg-block ib-msg-assistant"
-                        :key="getGroupTransitionKey(group)"
-                      >
+               <!-- Assistant response area (no collapse, fade transition per message) -->
+               <div v-if="hasAssistantMessages(q)" class="ib-response-area">
+                 <template v-for="(group, gi) in groupRoundMessages(q)" :key="gi">
+                   <template v-if="group.role === 'assistant'">
+                     <Transition name="ib-fade" mode="out-in">
+                       <div
+                         class="ib-msg-block ib-msg-assistant"
+                         :key="getGroupTransitionKey(group)"
+                         :class="{ 'is-rendering': !isEntryRendered(q) }"
+                       >
                         <div class="ib-msg-body">
                           <MessageViewer
                             :code="group.messages[group.messages.length - 1]?.content ?? ''"
