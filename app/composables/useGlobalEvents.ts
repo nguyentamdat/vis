@@ -837,7 +837,11 @@ export function useGlobalEvents(deps: Dependencies) {
   function extractFileRead(payload: unknown, eventType: string) {
     if (typeof payload === 'string') {
       if (deps.FILE_READ_EVENT_TYPES.has(eventType) || deps.FILE_WRITE_EVENT_TYPES.has(eventType)) {
-        return { content: payload, path: undefined, isWrite: deps.FILE_WRITE_EVENT_TYPES.has(eventType) };
+        return {
+          content: payload,
+          path: undefined,
+          isWrite: deps.FILE_WRITE_EVENT_TYPES.has(eventType),
+        };
       }
       return null;
     }
@@ -909,15 +913,17 @@ export function useGlobalEvents(deps: Dependencies) {
             if (bashLines.length > 0) bashLines.push('');
             bashLines.push(bashOutput);
           }
-          const bashCode = bashLines.length === 0 && status === 'running' ? '$' : bashLines.join('\n');
+          const bashCode =
+            bashLines.length === 0 && status === 'running' ? '$' : bashLines.join('\n');
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `bash-${callId ?? Date.now().toString(36)}`,
-              code: bashCode,
-              lang: 'shellscript',
-              theme: 'github-dark',
-              gutterMode: 'none',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `bash-${callId ?? Date.now().toString(36)}`,
+                code: bashCode,
+                lang: 'shellscript',
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
             variant: 'term' as const,
             callId,
             toolName: tool,
@@ -951,23 +957,25 @@ export function useGlobalEvents(deps: Dependencies) {
           if (status === 'running') return null;
           const grepCode = outputText ?? errorText ?? '';
           const grepLineRe = /^\s*Line\s+(\d+):\s?/;
-          const gutterLines = grepCode
-            .split('\n')
-            .map((line) => {
-              const match = line.match(grepLineRe);
-              return match?.[1] ?? '';
-            });
+          const gutterLines = grepCode.split('\n').map((line) => {
+            const match = line.match(grepLineRe);
+            return match?.[1] ?? '';
+          });
           const grepPattern = typeof input?.pattern === 'string' ? input.pattern : undefined;
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `grep-${callId ?? Date.now().toString(36)}`,
-              code: grepCode.split('\n').map((line) => line.replace(grepLineRe, '')).join('\n'),
-              lang: 'text',
-              theme: 'github-dark',
-              gutterMode: 'single',
-              gutterLines,
-              grepPattern,
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `grep-${callId ?? Date.now().toString(36)}`,
+                code: grepCode
+                  .split('\n')
+                  .map((line) => line.replace(grepLineRe, ''))
+                  .join('\n'),
+                lang: 'text',
+                theme: 'github-dark',
+                gutterMode: 'single',
+                gutterLines,
+                grepPattern,
+              }),
             variant: 'code' as const,
             callId,
             toolName: tool,
@@ -979,13 +987,14 @@ export function useGlobalEvents(deps: Dependencies) {
           if (status === 'running') return null;
           const globCode = outputText ?? errorText ?? '';
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `glob-${callId ?? Date.now().toString(36)}`,
-              code: globCode,
-              lang: 'text',
-              theme: 'github-dark',
-              gutterMode: 'none',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `glob-${callId ?? Date.now().toString(36)}`,
+                code: globCode,
+                lang: 'text',
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
             variant: 'term' as const,
             callId,
             toolName: tool,
@@ -996,13 +1005,14 @@ export function useGlobalEvents(deps: Dependencies) {
         case 'list': {
           const listCode = outputText ?? errorText ?? '';
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `list-${callId ?? Date.now().toString(36)}`,
-              code: listCode,
-              lang: 'text',
-              theme: 'github-dark',
-              gutterMode: 'single',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `list-${callId ?? Date.now().toString(36)}`,
+                code: listCode,
+                lang: 'text',
+                theme: 'github-dark',
+                gutterMode: 'single',
+              }),
             variant: 'code' as const,
             callId,
             toolName: tool,
@@ -1017,13 +1027,14 @@ export function useGlobalEvents(deps: Dependencies) {
           const webfetchLang =
             format === 'html' ? 'html' : format === 'markdown' ? 'markdown' : 'text';
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `webfetch-${callId ?? Date.now().toString(36)}`,
-              code: webfetchCode,
-              lang: webfetchLang,
-              theme: 'github-dark',
-              gutterMode: 'none',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `webfetch-${callId ?? Date.now().toString(36)}`,
+                code: webfetchCode,
+                lang: webfetchLang,
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
             variant: 'plain' as const,
             callId,
             toolName: tool,
@@ -1037,13 +1048,14 @@ export function useGlobalEvents(deps: Dependencies) {
           const searchPrefix = tool === 'websearch' ? 'SEARCH' : 'CODE';
           const searchCode = outputText ?? errorText ?? '';
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `${tool}-${callId ?? Date.now().toString(36)}`,
-              code: searchCode,
-              lang: 'markdown',
-              theme: 'github-dark',
-              gutterMode: 'none',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `${tool}-${callId ?? Date.now().toString(36)}`,
+                code: searchCode,
+                lang: 'markdown',
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
             variant: 'plain' as const,
             callId,
             toolName: tool,
@@ -1052,21 +1064,24 @@ export function useGlobalEvents(deps: Dependencies) {
           };
         }
         case 'task': {
-          const taskDescription = typeof input?.description === 'string' ? input.description.trim() : '';
+          const taskDescription =
+            typeof input?.description === 'string' ? input.description.trim() : '';
           const taskPrompt = typeof input?.prompt === 'string' ? input.prompt.trim() : '';
-          const taskTitle = taskDescription || (taskPrompt ? taskPrompt.split('\n')[0].slice(0, 80) : '');
+          const taskTitle =
+            taskDescription || (taskPrompt ? taskPrompt.split('\n')[0].slice(0, 80) : '');
           const taskOutput = deps.formatTaskToolOutput(outputText ?? errorText ?? '');
           const taskCode = taskPrompt
             ? `## Input\n\n${taskPrompt}\n\n---\n\n## Output\n\n${taskOutput}`
             : taskOutput;
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `task-${callId ?? Date.now().toString(36)}`,
-              code: taskCode,
-              lang: 'markdown',
-              theme: 'github-dark',
-              gutterMode: 'none',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `task-${callId ?? Date.now().toString(36)}`,
+                code: taskCode,
+                lang: 'markdown',
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
             variant: 'term' as const,
             callId,
             toolName: tool,
@@ -1077,13 +1092,14 @@ export function useGlobalEvents(deps: Dependencies) {
         case 'batch': {
           const batchCode = outputText ?? errorText ?? '';
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `batch-${callId ?? Date.now().toString(36)}`,
-              code: batchCode,
-              lang: 'text',
-              theme: 'github-dark',
-              gutterMode: 'single',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `batch-${callId ?? Date.now().toString(36)}`,
+                code: batchCode,
+                lang: 'text',
+                theme: 'github-dark',
+                gutterMode: 'single',
+              }),
             variant: 'code' as const,
             callId,
             toolName: tool,
@@ -1098,13 +1114,14 @@ export function useGlobalEvents(deps: Dependencies) {
           const inputFilePath = typeof input?.filePath === 'string' ? input.filePath : writePath;
           const writeLang = deps.guessLanguageFromPath(inputFilePath);
           return {
-            content: () => deps.renderWorkerHtml({
-              id: `write-${callId ?? Date.now().toString(36)}`,
-              code: writeCode,
-              lang: writeLang,
-              theme: 'github-dark',
-              gutterMode: 'single',
-            }),
+            content: () =>
+              deps.renderWorkerHtml({
+                id: `write-${callId ?? Date.now().toString(36)}`,
+                code: writeCode,
+                lang: writeLang,
+                theme: 'github-dark',
+                gutterMode: 'single',
+              }),
             variant: 'code' as const,
             callId,
             toolName: tool,
@@ -1117,14 +1134,20 @@ export function useGlobalEvents(deps: Dependencies) {
           const diff = typeof metadata?.diff === 'string' ? metadata.diff : '';
           if (!diff) return null;
           const editPath = deps.resolveReadWritePath(input, metadata, state);
-          const filediff = metadata?.filediff && typeof metadata.filediff === 'object'
-            ? (metadata.filediff as Record<string, unknown>)
-            : undefined;
+          const filediff =
+            metadata?.filediff && typeof metadata.filediff === 'object'
+              ? (metadata.filediff as Record<string, unknown>)
+              : undefined;
           const editCode = typeof filediff?.before === 'string' ? filediff.before : undefined;
           const editAfter = typeof filediff?.after === 'string' ? filediff.after : undefined;
           const editLang = deps.guessLanguageFromPath(editPath);
           return {
-            content: deps.renderEditDiffHtml({ diff, code: editCode, after: editAfter, lang: editLang }),
+            content: deps.renderEditDiffHtml({
+              diff,
+              code: editCode,
+              after: editAfter,
+              lang: editLang,
+            }),
             variant: 'diff' as const,
             callId,
             toolName: tool,
@@ -1143,29 +1166,50 @@ export function useGlobalEvents(deps: Dependencies) {
               const r = item as Record<string, unknown>;
               const diff = r.diff;
               if (typeof diff !== 'string' || !diff.trim()) return null;
-              const fd = r.filediff && typeof r.filediff === 'object'
-                ? (r.filediff as Record<string, unknown>)
-                : undefined;
+              const fd =
+                r.filediff && typeof r.filediff === 'object'
+                  ? (r.filediff as Record<string, unknown>)
+                  : undefined;
               return {
                 diff,
                 code: typeof fd?.before === 'string' ? fd.before : undefined,
                 after: typeof fd?.after === 'string' ? fd.after : undefined,
               };
             })
-            .filter((item): item is { diff: string; code: string | undefined; after: string | undefined } => Boolean(item));
+            .filter(
+              (
+                item,
+              ): item is { diff: string; code: string | undefined; after: string | undefined } =>
+                Boolean(item),
+            );
           if (editEntries.length > 1) {
             return editEntries.map((entry, index) => ({
-              content: deps.renderEditDiffHtml({ diff: entry.diff, code: entry.code, after: entry.after, lang: multiLang }),
+              content: deps.renderEditDiffHtml({
+                diff: entry.diff,
+                code: entry.code,
+                after: entry.after,
+                lang: multiLang,
+              }),
               variant: 'diff' as const,
               callId: callId ? `${callId}:${index}` : undefined,
               toolName: tool,
               toolStatus: status,
-              title: toolPrefix('EDIT', editPathMulti ? `${editPathMulti} (${index + 1}/${editEntries.length})` : `(${index + 1}/${editEntries.length})`),
+              title: toolPrefix(
+                'EDIT',
+                editPathMulti
+                  ? `${editPathMulti} (${index + 1}/${editEntries.length})`
+                  : `(${index + 1}/${editEntries.length})`,
+              ),
             }));
           }
           if (editEntries.length === 1) {
             return {
-              content: deps.renderEditDiffHtml({ diff: editEntries[0].diff, code: editEntries[0].code, after: editEntries[0].after, lang: multiLang }),
+              content: deps.renderEditDiffHtml({
+                diff: editEntries[0].diff,
+                code: editEntries[0].code,
+                after: editEntries[0].after,
+                lang: multiLang,
+              }),
               variant: 'diff' as const,
               callId,
               toolName: tool,

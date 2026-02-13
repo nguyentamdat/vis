@@ -20,12 +20,7 @@ export function useReasoningWindows(options: {
   toolWindowCanvasEl: Ref<HTMLDivElement | null>;
   reasoningCloseDelayMs: number;
 }) {
-  const {
-    selectedSessionId,
-    queue,
-    toolWindowCanvasEl,
-    reasoningCloseDelayMs,
-  } = options;
+  const { selectedSessionId, queue, toolWindowCanvasEl, reasoningCloseDelayMs } = options;
 
   const reasoningTitleBySessionId = new Map<string, string>();
   const reasoningCloseTimers = new Map<string, number>();

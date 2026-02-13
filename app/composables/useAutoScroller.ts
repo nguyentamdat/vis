@@ -325,7 +325,10 @@ export function useAutoScroller(
       lastSetScrollTop >= 0 &&
       Math.abs(el.scrollTop - lastSetScrollTop) <= INTERVENTION_TOLERANCE_PX
     ) {
-      followDebug('onScroll:setFollowing', { isFollowing: true, reason: 'programmatic-near-target' });
+      followDebug('onScroll:setFollowing', {
+        isFollowing: true,
+        reason: 'programmatic-near-target',
+      });
       return;
     }
     if (delta < -INTERVENTION_TOLERANCE_PX && scrollHeightDelta <= 0 && hasUserIntent) {
@@ -407,9 +410,8 @@ export function useAutoScroller(
   function teardown(el: HTMLElement) {
     followDebug('teardown', { top: el.scrollTop });
     el.removeEventListener('scroll', onScroll);
-    const clearPointerInteraction = (
-      el as HTMLElement & { __clearPointerInteraction?: () => void }
-    ).__clearPointerInteraction;
+    const clearPointerInteraction = (el as HTMLElement & { __clearPointerInteraction?: () => void })
+      .__clearPointerInteraction;
     const wheelIntentHandler = (el as HTMLElement & { __wheelIntentHandler?: () => void })
       .__wheelIntentHandler;
     const touchIntentHandler = (el as HTMLElement & { __touchIntentHandler?: () => void })

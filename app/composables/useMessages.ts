@@ -75,7 +75,7 @@ function normalizeUsage(value: unknown): MessageUsage | undefined {
     providerId: asString(rec?.providerId),
     modelId: asString(rec?.modelId),
     contextPercent:
-      rec?.contextPercent === null ? null : asNumber(rec?.contextPercent) ?? undefined,
+      rec?.contextPercent === null ? null : (asNumber(rec?.contextPercent) ?? undefined),
   };
 }
 
@@ -169,7 +169,9 @@ export function useMessages(scope: MessageScope, options: UseMessagesOptions = {
     return order.map((key) => parts.get(key) ?? '').join('');
   }
 
-  function parseMessagePayload(payload: unknown): { sessionId?: string; message: MessageShape } | null {
+  function parseMessagePayload(
+    payload: unknown,
+  ): { sessionId?: string; message: MessageShape } | null {
     const rec = toRecord(payload);
     if (!rec) return null;
     const nested = toRecord(rec.message);
@@ -189,12 +191,16 @@ export function useMessages(scope: MessageScope, options: UseMessagesOptions = {
     const partId = asString(message.partId);
     const rawContent = typeof message.content === 'string' ? message.content : '';
     const content =
-      partId && rawContent.length > 0 ? resolveStreamingContent(id, partId, rawContent) : rawContent;
+      partId && rawContent.length > 0
+        ? resolveStreamingContent(id, partId, rawContent)
+        : rawContent;
 
     setMessage(id, {
       sessionId,
       parentId: asString(message.parentId) ?? asString(message.parentID),
-      role: asRole(message.role) ?? (asString(message.parentId ?? message.parentID) ? 'assistant' : 'user'),
+      role:
+        asRole(message.role) ??
+        (asString(message.parentId ?? message.parentID) ? 'assistant' : 'user'),
       content,
       status: asStatus(message.status) ?? 'streaming',
       agent: asString(message.agent),
