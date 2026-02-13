@@ -1,19 +1,29 @@
-import { computed, onUnmounted, readonly, shallowReactive } from 'vue';
+import { computed, onUnmounted, readonly, shallowRef, triggerRef } from 'vue';
+import type { ShallowRef } from 'vue';
 import type {
-  Message,
   MessageAttachment,
   MessageDiffEntry,
   MessageStatus,
   MessageUsage,
 } from '../types/message';
 import type {
+  MessageInfo,
+  MessagePart,
   MessagePartUpdatedPacket,
   MessageUpdatedPacket,
-  TextPart,
 } from '../types/sse';
 import type { SessionScope } from './useGlobalEvents';
 
-type AssistantMessageInfo = Extract<MessageUpdatedPacket['info'], { role: 'assistant' }>;
+type MessageEntry = {
+  info?: MessageInfo;
+  parts: Set<ShallowRef<MessagePart>>;
+};
+
+type MessageError = { name: string; message: string } | null;
+
+function createMessageEntry(): MessageEntry {
+  return { parts: new Set<ShallowRef<MessagePart>>() };
+}
 
 function toRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -28,12 +38,21 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function asRole(value: unknown): Message['role'] | undefined {
-  return value === 'user' || value === 'assistant' ? value : undefined;
+function isMessageInfo(value: unknown): value is MessageInfo {
+  const rec = toRecord(value);
+  if (!rec) return false;
+  if (!asString(rec.id)) return false;
+  if (!asString(rec.sessionID)) return false;
+  return rec.role === 'user' || rec.role === 'assistant';
 }
 
-function asStatus(value: unknown): MessageStatus | undefined {
-  return value === 'streaming' || value === 'complete' || value === 'error' ? value : undefined;
+function isMessagePart(value: unknown): value is MessagePart {
+  const rec = toRecord(value);
+  if (!rec) return false;
+  if (!asString(rec.id)) return false;
+  if (!asString(rec.sessionID)) return false;
+  if (!asString(rec.messageID)) return false;
+  return typeof rec.type === 'string';
 }
 
 function normalizeTokens(value: unknown): MessageUsage['tokens'] | undefined {
@@ -57,250 +76,269 @@ function normalizeTokens(value: unknown): MessageUsage['tokens'] | undefined {
   };
 }
 
-function normalizeUsage(value: unknown): MessageUsage | undefined {
-  const rec = toRecord(value);
-  const tokens = normalizeTokens(rec?.tokens);
-  if (!tokens) return undefined;
-  return {
-    tokens,
-    cost: asNumber(rec?.cost),
-    providerId: asString(rec?.providerId),
-    modelId: asString(rec?.modelId),
-    contextPercent:
-      rec?.contextPercent === null ? null : (asNumber(rec?.contextPercent) ?? undefined),
-  };
+function getProviderId(info?: MessageInfo): string | undefined {
+  if (!info) return undefined;
+  return info.role === 'assistant' ? asString(info.providerID) : asString(info.model.providerID);
 }
 
-function normalizeUsageFromMessage(info: MessageUpdatedPacket['info']): MessageUsage | undefined {
-  if (info.role !== 'assistant') return undefined;
+function getModelId(info?: MessageInfo): string | undefined {
+  if (!info) return undefined;
+  return info.role === 'assistant' ? asString(info.modelID) : asString(info.model.modelID);
+}
+
+function normalizeUsage(info?: MessageInfo): MessageUsage | undefined {
+  if (!info || info.role !== 'assistant') return undefined;
   const tokens = normalizeTokens(info.tokens);
   if (!tokens) return undefined;
   return {
     tokens,
     cost: asNumber(info.cost),
-    providerId: asString(info.providerID),
-    modelId: asString(info.modelID),
+    providerId: getProviderId(info),
+    modelId: getModelId(info),
   };
 }
 
-function normalizeMessageError(
-  value: AssistantMessageInfo['error'] | undefined,
-): Message['error'] | undefined {
-  if (!value) return undefined;
-  const message = asString(toRecord(value.data)?.message) ?? '';
-  return { name: value.name, message };
+function resolveStatus(info?: MessageInfo): MessageStatus {
+  if (!info) return 'streaming';
+  if (info.role === 'user') return 'complete';
+  if (info.error || info.finish === 'error') return 'error';
+  if (info.time.completed !== undefined || info.finish) return 'complete';
+  return 'streaming';
 }
 
-function normalizeAttachments(value: unknown): MessageAttachment[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const result: MessageAttachment[] = [];
-  for (let index = 0; index < value.length; index++) {
-    const rec = toRecord(value[index]);
-    if (!rec) continue;
-    const url = asString(rec.url);
-    if (!url) continue;
-    const id = asString(rec.id) ?? `attachment:${index}:${url}`;
-    const mime = asString(rec.mime) ?? asString(rec.mediaType) ?? 'application/octet-stream';
-    const filename = asString(rec.filename) ?? asString(rec.name) ?? `attachment-${index + 1}`;
-    result.push({ id, url, mime, filename });
-  }
-  return result.length > 0 ? result : undefined;
+function resolveError(info?: MessageInfo): MessageError {
+  const status = resolveStatus(info);
+  if (!info || info.role !== 'assistant') return null;
+  if (!info.error) return status === 'error' ? { name: 'Error', message: '' } : null;
+  const message = asString(toRecord(info.error.data)?.message) ?? '';
+  return { name: info.error.name, message };
 }
 
-function normalizeDiffs(value: unknown): MessageDiffEntry[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const result: MessageDiffEntry[] = [];
-  for (const item of value) {
-    const rec = toRecord(item);
-    if (!rec) continue;
-    const file = asString(rec.file) ?? asString(rec.path);
-    if (!file) continue;
-    result.push({
-      file,
-      diff: asString(rec.diff) ?? '',
-      before: asString(rec.before),
-      after: asString(rec.after),
-    });
-  }
-  return result.length > 0 ? result : undefined;
-}
-
-function byTimeThenId(a: Message, b: Message): number {
-  const aTime = a.time ?? 0;
-  const bTime = b.time ?? 0;
+function byTimeThenId(a: MessageInfo, b: MessageInfo): number {
+  const aTime = asNumber(a.time.created) ?? 0;
+  const bTime = asNumber(b.time.created) ?? 0;
   if (aTime !== bTime) return aTime - bTime;
   return a.id.localeCompare(b.id);
 }
 
-function resolveMessageStatus(info: MessageUpdatedPacket['info'], current?: MessageStatus): MessageStatus {
-  if (info.role === 'user') return 'complete';
-  if (info.error || info.finish === 'error') return 'error';
-  if (info.time.completed !== undefined || info.finish) return 'complete';
-  return current === 'complete' ? 'complete' : 'streaming';
-}
-
-function resolveStreamedPartText(previous: string, packet: MessagePartUpdatedPacket, part: TextPart): string {
-  if (typeof packet.delta === 'string' && packet.delta.length > 0) {
-    return previous + packet.delta;
-  }
-  return part.text;
-}
-
 export function useMessages(scope: SessionScope) {
-  const messages = shallowReactive(new Map<string, Message>());
-  const messagePartsById = new Map<string, Map<string, string>>();
-  const messagePartOrderById = new Map<string, string[]>();
+  const messages = shallowRef(new Map<string, ShallowRef<MessageEntry>>());
+  const parts = new Map<string, ShallowRef<MessagePart>>();
 
-  function get(id: string): Message | undefined {
-    return messages.get(id);
+  function ensureMessage(id: string, notifyCollection = true): ShallowRef<MessageEntry> {
+    let ref = messages.value.get(id);
+    if (ref) return ref;
+    ref = shallowRef(createMessageEntry());
+    messages.value.set(id, ref);
+    if (notifyCollection) triggerRef(messages);
+    return ref;
   }
 
-  function setMessage(id: string, updates: Partial<Message>) {
-    const existing = messages.get(id);
+  function partLookupKey(messageId: string, partId: string): string {
+    return `${messageId}:${partId}`;
+  }
+
+  function updateMessage(info: MessageInfo, notifyCollection = true) {
+    const messageRef = ensureMessage(info.id, notifyCollection);
+    messageRef.value.info = info;
+    triggerRef(messageRef);
+  }
+
+  function updatePart(part: MessagePart, notifyCollection = true) {
+    const key = partLookupKey(part.messageID, part.id);
+    const existing = parts.get(key);
     if (existing) {
-      messages.set(id, { ...existing, ...updates, id });
+      existing.value = part;
+      triggerRef(existing);
       return;
     }
-    const role = updates.role ?? 'assistant';
-    const sessionId = updates.sessionId;
-    if (!sessionId) return;
-    messages.set(id, {
-      id,
-      sessionId,
-      role,
-      content: updates.content ?? '',
-      status: updates.status ?? 'streaming',
-      parentId: updates.parentId,
-      agent: updates.agent,
-      model: updates.model,
-      providerId: updates.providerId,
-      modelId: updates.modelId,
-      variant: updates.variant,
-      time: updates.time,
-      usage: updates.usage,
-      attachments: updates.attachments,
-      diffs: updates.diffs,
-      error: updates.error ?? null,
-      classification: updates.classification,
-    });
+    const partRef = shallowRef(part);
+    parts.set(key, partRef);
+    const messageRef = ensureMessage(part.messageID, notifyCollection);
+    messageRef.value.parts.add(partRef);
+    triggerRef(messageRef);
   }
 
-  function resolveStreamingContent(id: string, partId: string, content: string): string {
-    const parts = messagePartsById.get(id) ?? new Map<string, string>();
-    parts.set(partId, content);
-    messagePartsById.set(id, parts);
-    const order = messagePartOrderById.get(id) ?? [];
-    if (!order.includes(partId)) order.push(partId);
-    messagePartOrderById.set(id, order);
-    return order.map((key) => parts.get(key) ?? '').join('');
+  function get(id: string): MessageInfo | undefined {
+    return messages.value.get(id)?.value.info;
   }
 
-  function handleMessagePartUpdated(packet: MessagePartUpdatedPacket) {
-    if (packet.part.type !== 'text') return;
-    const part = packet.part;
-    const messageId = part.messageID;
-    const partId = part.id;
-    const previous = messagePartsById.get(messageId)?.get(partId) ?? '';
-    const partText = resolveStreamedPartText(previous, packet, part);
-    const content = resolveStreamingContent(messageId, partId, partText);
-    const existing = messages.get(messageId);
-    setMessage(messageId, {
-      sessionId: part.sessionID,
-      role: existing?.role,
-      content,
-      status: existing?.status === 'error' ? 'error' : 'streaming',
-      time: existing?.time,
-    });
+  function getParts(id: string): MessagePart[] {
+    const messageRef = messages.value.get(id);
+    if (!messageRef) return [];
+    const result: MessagePart[] = [];
+    for (const partRef of messageRef.value.parts) {
+      result.push(partRef.value);
+    }
+    return result;
   }
 
-  function handleMessageUpdated(packet: MessageUpdatedPacket) {
-    const info = packet.info;
-    const id = info.id;
-    const existing = messages.get(id);
-    const usage = normalizeUsageFromMessage(info);
-    const error = normalizeMessageError(info.role === 'assistant' ? info.error : undefined);
-    const status = resolveMessageStatus(info, existing?.status);
-
-    setMessage(id, {
-      sessionId: info.sessionID,
-      role: info.role,
-      parentId: info.role === 'assistant' ? info.parentID : undefined,
-      content: existing?.content ?? '',
-      status,
-      agent: asString(info.agent),
-      providerId:
-        info.role === 'assistant'
-          ? asString(info.providerID)
-          : asString(toRecord(info.model)?.providerID),
-      modelId:
-        info.role === 'assistant' ? asString(info.modelID) : asString(toRecord(info.model)?.modelID),
-      variant: asString(info.variant),
-      time: asNumber(info.time.created),
-      usage,
-      diffs: info.role === 'user' ? normalizeDiffs(info.summary?.diffs) : undefined,
-      error: error ?? (status === 'error' ? { name: 'Error', message: '' } : null),
-    });
+  function getPartsByType<T extends MessagePart['type']>(
+    id: string,
+    type: T,
+  ): Array<Extract<MessagePart, { type: T }>> {
+    const result: Array<Extract<MessagePart, { type: T }>> = [];
+    const messageRef = messages.value.get(id);
+    if (!messageRef) return result;
+    for (const partRef of messageRef.value.parts) {
+      const part = partRef.value;
+      if (part.type !== type) continue;
+      result.push(part as Extract<MessagePart, { type: T }>);
+    }
+    return result;
   }
 
-  function getChildren(parentId: string): Message[] {
-    return [...messages.values()].filter((msg) => msg.parentId === parentId).sort(byTimeThenId);
+  function getTextContent(id: string): string {
+    const chunks: string[] = [];
+    const textParts = getPartsByType(id, 'text');
+    for (const part of textParts) {
+      if (!part.text) continue;
+      chunks.push(part.text);
+    }
+    return chunks.join('');
   }
 
-  function getThread(rootId: string): Message[] {
-    const root = messages.get(rootId);
+  function getImageAttachments(id: string): MessageAttachment[] | undefined {
+    const files = getPartsByType(id, 'file');
+    if (files.length === 0) return undefined;
+    const result: MessageAttachment[] = [];
+    let index = 0;
+    for (const part of files) {
+      if (!part.mime.startsWith('image/')) continue;
+      result.push({
+        id: part.id,
+        url: part.url,
+        mime: part.mime,
+        filename: part.filename ?? `attachment-${index + 1}`,
+      });
+      index += 1;
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  function getUsage(id: string): MessageUsage | undefined {
+    return normalizeUsage(get(id));
+  }
+
+  function getStatus(id: string): MessageStatus {
+    return resolveStatus(get(id));
+  }
+
+  function getError(id: string): MessageError {
+    return resolveError(get(id));
+  }
+
+  function getDiffs(id: string): MessageDiffEntry[] | undefined {
+    const info = get(id);
+    if (!info || info.role !== 'user' || !Array.isArray(info.summary?.diffs)) return undefined;
+    const result: MessageDiffEntry[] = [];
+    for (const diff of info.summary.diffs) {
+      if (!diff.file) continue;
+      result.push({
+        file: diff.file,
+        diff: '',
+        before: diff.before,
+        after: diff.after,
+      });
+    }
+    return result.length > 0 ? result : undefined;
+  }
+
+  function getModelPath(id: string): string | undefined {
+    const info = get(id);
+    if (!info) return undefined;
+    const providerId = getProviderId(info);
+    const modelId = getModelId(info);
+    if (providerId && modelId) return `${providerId}/${modelId}`;
+    return modelId || providerId;
+  }
+
+  function getTime(id: string): number | undefined {
+    const info = get(id);
+    if (!info) return undefined;
+    return asNumber(info.time.created);
+  }
+
+  function getChildren(parentId: string): MessageInfo[] {
+    const result: MessageInfo[] = [];
+    for (const messageRef of messages.value.values()) {
+      const info = messageRef.value.info;
+      if (!info || info.role !== 'assistant') continue;
+      if (info.parentID !== parentId) continue;
+      result.push(info);
+    }
+    return result.sort(byTimeThenId);
+  }
+
+  function getThread(rootId: string): MessageInfo[] {
+    const root = get(rootId);
     if (!root) return [];
-    const result: Message[] = [];
+    const result: MessageInfo[] = [];
     const queue: string[] = [rootId];
     const visited = new Set<string>();
     while (queue.length > 0) {
       const current = queue.shift();
       if (!current || visited.has(current)) continue;
       visited.add(current);
-      const message = messages.get(current);
-      if (!message) continue;
-      result.push(message);
+      const info = get(current);
+      if (!info) continue;
+      result.push(info);
       const children = getChildren(current);
       for (const child of children) queue.push(child.id);
     }
     return result.sort(byTimeThenId);
   }
 
-  function getFinalAnswer(rootId: string): Message | undefined {
+  function getFinalAnswer(rootId: string): MessageInfo | undefined {
     const thread = getThread(rootId);
-    const assistants = thread.filter((msg) => msg.role === 'assistant').sort(byTimeThenId);
+    const assistants = thread.filter((message) => message.role === 'assistant').sort(byTimeThenId);
     return assistants[assistants.length - 1];
   }
 
   function loadHistory(entries: unknown[]) {
+    let collectionChanged = false;
     for (const entry of entries) {
       const rec = toRecord(entry);
       if (!rec) continue;
-      const id = asString(rec.id);
-      const sessionId = asString(rec.sessionId) ?? asString(rec.sessionID);
-      if (!id || !sessionId) continue;
-      setMessage(id, {
-        sessionId,
-        parentId: asString(rec.parentId) ?? asString(rec.parentID),
-        role: asRole(rec.role) ?? 'assistant',
-        content: asString(rec.content) ?? asString(rec.text) ?? '',
-        status: asStatus(rec.status) ?? 'complete',
-        time: asNumber(rec.time) ?? asNumber(rec.messageTime),
-        usage: normalizeUsage(rec.usage),
-        attachments: normalizeAttachments(rec.attachments),
-        diffs: normalizeDiffs(rec.diffs),
-      });
+      const info = rec.info;
+      const partsList = rec.parts;
+      if (!isMessageInfo(info)) continue;
+      const hasMessage = messages.value.has(info.id);
+      const messageRef = ensureMessage(info.id, false);
+      if (!hasMessage) collectionChanged = true;
+      if (!messageRef.value.info) {
+        messageRef.value.info = info;
+        triggerRef(messageRef);
+      }
+      if (!Array.isArray(partsList)) continue;
+      let addedPart = false;
+      for (const item of partsList) {
+        if (!isMessagePart(item)) continue;
+        const key = partLookupKey(item.messageID, item.id);
+        if (parts.has(key)) continue;
+        const partRef = shallowRef(item);
+        parts.set(key, partRef);
+        messageRef.value.parts.add(partRef);
+        addedPart = true;
+      }
+      if (addedPart) triggerRef(messageRef);
     }
+    if (collectionChanged) triggerRef(messages);
   }
 
   function reset() {
-    messages.clear();
-    messagePartsById.clear();
-    messagePartOrderById.clear();
+    messages.value.clear();
+    parts.clear();
+    triggerRef(messages);
   }
 
   const unsubscribers = [
-    scope.on('message.part.updated', handleMessagePartUpdated),
-    scope.on('message.updated', handleMessageUpdated),
+    scope.on('message.part.updated', (packet: MessagePartUpdatedPacket) => {
+      updatePart(packet.part);
+    }),
+    scope.on('message.updated', (packet: MessageUpdatedPacket) => {
+      updateMessage(packet.info);
+    }),
   ];
 
   function dispose() {
@@ -310,23 +348,53 @@ export function useMessages(scope: SessionScope) {
   onUnmounted(dispose);
 
   const roots = computed(() => {
-    return [...messages.values()]
-      .filter((msg) => !msg.parentId || !messages.has(msg.parentId))
-      .sort(byTimeThenId);
+    const result: MessageInfo[] = [];
+    for (const messageRef of messages.value.values()) {
+      const info = messageRef.value.info;
+      if (!info) continue;
+      if (info.role === 'user') {
+        result.push(info);
+        continue;
+      }
+      const parent = messages.value.get(info.parentID)?.value.info;
+      if (!parent) result.push(info);
+    }
+    return result.sort(byTimeThenId);
   });
 
   const streaming = computed(() => {
-    return [...messages.values()].filter((msg) => msg.status === 'streaming').sort(byTimeThenId);
+    const result: MessageInfo[] = [];
+    for (const messageRef of messages.value.values()) {
+      const info = messageRef.value.info;
+      if (!info) continue;
+      if (resolveStatus(info) !== 'streaming') continue;
+      result.push(info);
+    }
+    return result.sort(byTimeThenId);
   });
 
   return {
     messages: readonly(messages),
     roots,
+    streaming,
+    get,
+    getParts,
+    getPartsByType,
+    getTextContent,
+    getImageAttachments,
+    getUsage,
+    getStatus,
+    getError,
+    getDiffs,
+    getModelPath,
+    getProviderId,
+    getModelId,
+    getTime,
     getChildren,
     getThread,
     getFinalAnswer,
-    get,
-    streaming,
+    updateMessage,
+    updatePart,
     loadHistory,
     reset,
     dispose,
