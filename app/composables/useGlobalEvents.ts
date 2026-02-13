@@ -1,5 +1,5 @@
 import { type Ref } from 'vue';
-import type { GlobalEventMap } from '../types/message';
+import type { GlobalEventMap } from '../types/sse';
 import { TypedEmitter } from '../utils/eventEmitter';
 
 type PermissionReply = 'once' | 'always' | 'reject';
@@ -257,7 +257,10 @@ export function useGlobalEvents(deps: Dependencies) {
             : undefined)) ??
       (messageObject && deps.extractMessageTextFromParts(messageObject.parts));
 
-    const message = messageFromPart ?? messageFromObject;
+    const normalizedEventType = deps.normalizeEventType(eventType);
+    const allowEmptyMessage = normalizedEventType === 'messageupdated';
+    const message =
+      messageFromPart ?? messageFromObject ?? (allowEmptyMessage ? '' : undefined);
 
     if (typeof message !== 'string') return null;
 
@@ -296,7 +299,33 @@ export function useGlobalEvents(deps: Dependencies) {
       (record.messageId as string | undefined) ??
       (record.id as string | undefined) ??
       (properties?.sessionID as string | undefined);
-    const id = (part?.id as string | undefined) ?? messageId ?? 'message:default';
+    const id = messageId ?? (part?.id as string | undefined) ?? 'message:default';
+
+    const parentId =
+      (messageObject?.parentId as string | undefined) ??
+      (messageObject?.parentID as string | undefined) ??
+      (info?.parentId as string | undefined) ??
+      (info?.parentID as string | undefined) ??
+      (properties?.parentId as string | undefined) ??
+      (properties?.parentID as string | undefined) ??
+      (data?.parentId as string | undefined) ??
+      (data?.parentID as string | undefined) ??
+      (record.parentId as string | undefined) ??
+      (record.parentID as string | undefined);
+
+    const sessionId =
+      (part?.sessionID as string | undefined) ??
+      (part?.sessionId as string | undefined) ??
+      (messageObject?.sessionId as string | undefined) ??
+      (messageObject?.sessionID as string | undefined) ??
+      (info?.sessionId as string | undefined) ??
+      (info?.sessionID as string | undefined) ??
+      (properties?.sessionId as string | undefined) ??
+      (properties?.sessionID as string | undefined) ??
+      (data?.sessionId as string | undefined) ??
+      (data?.sessionID as string | undefined) ??
+      (record.sessionId as string | undefined) ??
+      (record.sessionID as string | undefined);
 
     if (userMeta) {
       deps.storeUserMessageMeta(messageId ?? id, userMeta);
@@ -310,6 +339,8 @@ export function useGlobalEvents(deps: Dependencies) {
       messageId,
       content: message,
       bodyContent: messageFromObject,
+      parentId,
+      sessionId,
       role: resolvedRole,
       partId,
       partType,
