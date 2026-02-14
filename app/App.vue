@@ -988,6 +988,68 @@ function normalizeDirectory(value: string) {
   return trimmed || value;
 }
 
+function normalizeRelativePathNoParent(value: string) {
+  const segments = value.replace(/\\/g, '/').split('/');
+  const cleaned: string[] = [];
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..') continue;
+    cleaned.push(segment);
+  }
+  return cleaned.join('/');
+}
+
+function normalizeAbsolutePathNoParent(value: string) {
+  const segments = value.replace(/\\/g, '/').split('/');
+  const cleaned: string[] = [];
+  for (const segment of segments) {
+    if (!segment || segment === '.') continue;
+    if (segment === '..') {
+      if (cleaned.length > 0) cleaned.pop();
+      continue;
+    }
+    cleaned.push(segment);
+  }
+  return `/${cleaned.join('/')}`;
+}
+
+function splitFileContentDirectoryAndPath(targetPath: string, sandboxDirectory: string) {
+  const sandbox = normalizeAbsolutePathNoParent(normalizeDirectory(sandboxDirectory));
+  const source = targetPath.replace(/\\/g, '/').trim();
+
+  if (!source) {
+    return {
+      directory: sandbox,
+      path: '.',
+    };
+  }
+
+  if (!source.startsWith('/')) {
+    const relative = normalizeRelativePathNoParent(source);
+    return {
+      directory: sandbox,
+      path: relative || '.',
+    };
+  }
+
+  const absolute = normalizeAbsolutePathNoParent(source);
+  const sandboxPrefix = `${sandbox}/`;
+  if (absolute.startsWith(sandboxPrefix)) {
+    const relative = absolute.slice(sandboxPrefix.length);
+    return {
+      directory: sandbox,
+      path: relative || '.',
+    };
+  }
+
+  const slashIndex = absolute.lastIndexOf('/');
+  const directory = slashIndex > 0 ? absolute.slice(0, slashIndex) : '/';
+  const relative = slashIndex >= 0 ? absolute.slice(slashIndex + 1) : absolute;
+  return {
+    directory,
+    path: relative || '.',
+  };
+}
+
 function replaceHomePrefix(path: string) {
   const normalizedPath = normalizeDirectory(path);
   const normalizedHome = normalizeDirectory(homePath.value);
@@ -4632,17 +4694,12 @@ async function renderReadHtmlFromApi(params: {
   if (!directory) return renderText('No active directory selected for READ window.');
   if (!params.path) return renderText('READ path is missing in tool payload.');
 
-  // API expects path relative to directory
-  const normalizedDir = normalizeDirectory(directory);
-  const prefix = `${normalizedDir}/`;
-  const relativePath = params.path.startsWith(prefix)
-    ? params.path.slice(prefix.length)
-    : params.path;
+  const requestPath = splitFileContentDirectoryAndPath(params.path, directory);
 
   try {
     const data = (await opencodeApi.readFileContent(OPENCODE_BASE_URL, {
-      directory,
-      path: relativePath,
+      directory: requestPath.directory,
+      path: requestPath.path,
     })) as FileContentResponse;
     const type = data?.type === 'binary' ? 'binary' : 'text';
 
@@ -5445,17 +5502,12 @@ async function openFileViewer(path: string) {
    }
 
    try {
-     // API expects path relative to directory
-     const normalizedDir = normalizeDirectory(directory);
-     const prefix = `${normalizedDir}/`;
-     const relativePath = path.startsWith(prefix)
-       ? path.slice(prefix.length)
-       : path;
+      const requestPath = splitFileContentDirectoryAndPath(path, directory);
 
-     const data = (await opencodeApi.readFileContent(OPENCODE_BASE_URL, {
-       directory,
-       path: relativePath,
-     })) as FileContentResponse;
+      const data = (await opencodeApi.readFileContent(OPENCODE_BASE_URL, {
+        directory: requestPath.directory,
+        path: requestPath.path,
+      })) as FileContentResponse;
     const type = data?.type === 'binary' ? 'binary' : 'text';
     const encoding = typeof data?.encoding === 'string' ? data.encoding : 'utf-8';
     const content = typeof data?.content === 'string' ? data.content : '';
