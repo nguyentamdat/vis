@@ -340,6 +340,29 @@ onBeforeUnmount(() => {
   background: rgba(15, 23, 42, 0.5);
   border: 1px solid rgba(148, 163, 184, 0.18);
   overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.message-content :deep(.markdown-host pre:hover) {
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.message-content :deep(.markdown-host pre)::-webkit-scrollbar {
+  height: 6px;
+}
+
+.message-content :deep(.markdown-host pre)::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.message-content :deep(.markdown-host pre)::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-content :deep(.markdown-host pre:hover)::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .message-content :deep(.markdown-host pre code) {
