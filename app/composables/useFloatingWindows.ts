@@ -162,7 +162,6 @@ export function useFloatingWindows() {
       key,
       time: Date.now(),
       zIndex: existing ? existing.zIndex : nextZIndex(),
-      expiresAt: resolveExpiresAt(opts, existing),
     } as FloatingWindowEntry;
 
     // When updating an existing entry, merge props instead of replacing
@@ -221,6 +220,10 @@ export function useFloatingWindows() {
       merged.resolvedHtml = '';
       merged.isReady = true;
     }
+
+    // expiresAt must be computed after content resolution (not in the merge block above)
+    // so the TTL countdown starts from display-ready, not before async work.
+    merged.expiresAt = resolveExpiresAt(opts, existing);
 
     entriesMap.set(key, sanitizeEntry(merged));
 

@@ -36,7 +36,9 @@ export type ToolRenderersHelpers = {
   formatWebfetchToolTitle: (input?: Record<string, unknown>) => string;
   formatQueryToolTitle: (input?: Record<string, unknown>) => string;
   formatTaskToolOutput: (value: string) => string;
-  DefaultContent: unknown;
+  GrepContent: unknown;
+  GlobContent: unknown;
+  WebContent: unknown;
 };
 
 export function extractStepFinish(
@@ -272,7 +274,7 @@ export function extractFileRead(
         };
       }
       case 'read': {
-        if (status === 'running') return null;
+        if (status === 'completed' || status === 'error') return null;
         const readPath = helpers.resolveReadWritePath(input, metadata, state);
         if (outputText && outputText.includes('<type>directory</type>')) {
           const entriesContent = extractXmlTagContent(outputText, 'entries') ?? outputText;
@@ -288,7 +290,7 @@ export function extractFileRead(
             variant: 'term' as const,
             callId,
             toolName: tool,
-            toolStatus: status,
+            toolStatus: 'completed',
             title: toolPrefix('READ', readPath),
           };
         }
@@ -307,12 +309,27 @@ export function extractFileRead(
           variant: 'code' as const,
           callId,
           toolName: tool,
-          toolStatus: status,
+          toolStatus: 'completed',
           title: toolPrefix('READ', readPath),
         };
       }
       case 'grep': {
-        if (status === 'running') return null;
+        if (status === 'running') {
+          return {
+            component: helpers.GrepContent,
+            props: {
+              html: '',
+              status,
+              pattern: typeof input?.pattern === 'string' ? input.pattern : undefined,
+              path: typeof input?.path === 'string' ? input.path : undefined,
+              include: typeof input?.include === 'string' ? input.include : undefined,
+            },
+            callId,
+            toolName: tool,
+            toolStatus: status,
+            title: toolPrefix('GREP', helpers.formatGlobToolTitle(input)),
+          };
+        }
         const grepCode = outputText ?? errorText ?? '';
         const grepLineRe = /^\s*Line\s+(\d+):\s?/;
         const gutterLines = grepCode.split('\n').map((line) => {
@@ -321,6 +338,8 @@ export function extractFileRead(
         });
         const grepPattern = typeof input?.pattern === 'string' ? input.pattern : undefined;
         return {
+          component: undefined,
+          props: undefined,
           content: () =>
             helpers.renderWorkerHtml({
               id: `grep-${callId ?? Date.now().toString(36)}`,
@@ -342,9 +361,26 @@ export function extractFileRead(
         };
       }
       case 'glob': {
-        if (status === 'running') return null;
+        if (status === 'running') {
+          return {
+            component: helpers.GlobContent,
+            props: {
+              html: '',
+              status,
+              pattern: typeof input?.pattern === 'string' ? input.pattern : undefined,
+              path: typeof input?.path === 'string' ? input.path : undefined,
+              include: typeof input?.include === 'string' ? input.include : undefined,
+            },
+            callId,
+            toolName: tool,
+            toolStatus: status,
+            title: toolPrefix('GLOB', helpers.formatGlobToolTitle(input)),
+          };
+        }
         const globCode = outputText ?? errorText ?? '';
         return {
+          component: undefined,
+          props: undefined,
           content: () =>
             helpers.renderWorkerHtml({
               id: `glob-${callId ?? Date.now().toString(36)}`,
@@ -379,12 +415,28 @@ export function extractFileRead(
         };
       }
       case 'webfetch': {
-        if (status === 'running') return null;
+        if (status === 'running') {
+          return {
+            component: helpers.WebContent,
+            props: {
+              html: '',
+              status,
+              tool,
+              url: typeof input?.url === 'string' ? input.url : undefined,
+            },
+            callId,
+            toolName: tool,
+            toolStatus: status,
+            title: toolPrefix('FETCH', helpers.formatWebfetchToolTitle(input)),
+          };
+        }
         const webfetchCode = outputText ?? errorText ?? '';
         const format = typeof input?.format === 'string' ? input.format.toLowerCase() : '';
         const webfetchLang =
           format === 'html' ? 'html' : format === 'markdown' ? 'markdown' : 'text';
         return {
+          component: undefined,
+          props: undefined,
           content: () =>
             helpers.renderWorkerHtml({
               id: `webfetch-${callId ?? Date.now().toString(36)}`,
@@ -402,10 +454,27 @@ export function extractFileRead(
       }
       case 'websearch':
       case 'codesearch': {
-        if (status === 'running') return null;
+        if (status === 'running') {
+          const searchPrefix = tool === 'websearch' ? 'SEARCH' : 'CODE';
+          return {
+            component: helpers.WebContent,
+            props: {
+              html: '',
+              status,
+              tool,
+              query: typeof input?.query === 'string' ? input.query : undefined,
+            },
+            callId,
+            toolName: tool,
+            toolStatus: status,
+            title: toolPrefix(searchPrefix, helpers.formatQueryToolTitle(input)),
+          };
+        }
         const searchPrefix = tool === 'websearch' ? 'SEARCH' : 'CODE';
         const searchCode = outputText ?? errorText ?? '';
         return {
+          component: undefined,
+          props: undefined,
           content: () =>
             helpers.renderWorkerHtml({
               id: `${tool}-${callId ?? Date.now().toString(36)}`,
@@ -578,14 +647,7 @@ export function extractFileRead(
       }
       case 'plan_enter':
       case 'plan_exit': {
-        return {
-          component: helpers.DefaultContent,
-          props: { input, output: outputText, error: errorText, status, state, toolName: tool },
-          callId,
-          toolName: tool,
-          toolStatus: status,
-          title: toolPrefix(tool === 'plan_enter' ? 'PLAN' : 'PLAN EXIT'),
-        };
+        return null;
       }
       default:
         return null;
