@@ -34,6 +34,7 @@ watch(
     const saved = el.scrollTop;
     nextTick(() => {
       el.scrollTop = saved;
+      notifyContentChange();
     });
   },
   { flush: 'pre' },
