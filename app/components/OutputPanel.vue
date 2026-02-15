@@ -92,7 +92,25 @@
               </div>
 
               <div class="ib-footer">
-                <span class="ib-footer-meta">{{ formatThreadFooterMeta(root) }}</span>
+                <span class="ib-footer-meta">
+                  <span v-if="formatThreadTimestamp(root)" class="ib-meta-item">
+                    <Icon icon="lucide:clock" :width="10" :height="10" />
+                    {{ formatThreadTimestamp(root) }}
+                  </span>
+                  <span v-if="formatThreadElapsed(root)" class="ib-meta-item">
+                    <Icon icon="lucide:timer" :width="10" :height="10" />
+                    {{ formatThreadElapsed(root) }}
+                  </span>
+                  <span v-if="getThreadContextPercent(root) != null" class="ib-meta-item" :class="contextSeverityClass(getThreadContextPercent(root)!)">
+                    <Icon icon="lucide:gauge" :width="10" :height="10" />
+                    {{ getThreadContextPercent(root) }}%
+                  </span>
+                  <span v-if="getThreadTokens(root)" class="ib-meta-item ib-meta-tokens">
+                    <span class="ib-token-in" title="Input tokens"><Icon icon="lucide:arrow-up" :width="9" :height="9" />{{ formatTokenCount(getThreadTokens(root)!.input) }}</span>
+                    <span class="ib-token-out" title="Output tokens"><Icon icon="lucide:arrow-down" :width="9" :height="9" />{{ formatTokenCount(getThreadTokens(root)!.output) }}</span>
+                    <span class="ib-token-reason" title="Reasoning tokens"><Icon icon="lucide:brain" :width="9" :height="9" />{{ formatTokenCount(getThreadTokens(root)!.reasoning) }}</span>
+                  </span>
+                </span>
                 <span class="ib-footer-actions">
                   <button
                     v-if="hasThreadDiffs(root)"
@@ -210,7 +228,7 @@ import MessageViewer from './MessageViewer.vue';
 import { renderWorkerHtml } from '../utils/workerRenderer';
 import { useAutoScroller } from '../composables/useAutoScroller';
 import { useMessages } from '../composables/useMessages';
-import type { MessageAttachment, MessageDiffEntry, MessageStatus, MessageUsage } from '../types/message';
+import type { MessageAttachment, MessageDiffEntry, MessageStatus, MessageTokens, MessageUsage } from '../types/message';
 import type { MessageInfo, MessagePart, ToolPart } from '../types/sse';
 
 type DiffEntry = { file: string; diff: string; before?: string; after?: string };
@@ -232,6 +250,7 @@ const props = defineProps<{
   busyDescendantCount?: number;
   theme: string;
   resolveAgentColor?: (agent?: string) => string;
+  computeContextPercent?: (tokens: MessageTokens, providerId?: string, modelId?: string) => number | null;
 }>();
 
 const emit = defineEmits<{
@@ -532,34 +551,89 @@ function formatThreadTimestamp(root: MessageInfo): string {
   return formatMessageTime(getMessageTime(getFinalAnswer(root)) ?? getMessageTime(root));
 }
 
+function getCompletedTime(message?: MessageInfo): number | undefined {
+  if (!message) return undefined;
+  return msg.getCompletedTime(message.id);
+}
+
 function formatThreadElapsed(root: MessageInfo): string {
   const final = getFinalAnswer(root);
   const start = getMessageTime(root);
-  const end = getMessageTime(final);
+  const end = getCompletedTime(final);
   if (typeof start !== 'number' || typeof end !== 'number') return '';
   const sec = Math.round((end - start) / 1000);
   if (sec < 1) return '';
-  if (sec < 60) return `thought ${sec}s`;
+  if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
   const rem = sec % 60;
-  return rem > 0 ? `thought ${min}m${rem}s` : `thought ${min}m`;
+  return rem > 0 ? `${min}m${rem}s` : `${min}m`;
 }
 
-function formatThreadFooterMeta(root: MessageInfo): string {
-  const parts: string[] = [];
-  const timestamp = formatThreadTimestamp(root);
-  if (timestamp) parts.push(timestamp);
-  const contextPercent = formatContextPercent(getFinalAnswer(root));
-  if (contextPercent) parts.push(contextPercent);
-  const elapsed = formatThreadElapsed(root);
-  if (elapsed) parts.push(elapsed);
-  return parts.join(', ');
+/**
+ * Sum info.tokens across ALL assistant messages in a thread.
+ * Context % uses the LAST assistant only (= current context window state).
+ */
+function getThreadTokens(root: MessageInfo): MessageTokens | null {
+  const thread = getThread(root.id);
+  let input = 0;
+  let output = 0;
+  let reasoning = 0;
+  let totalAcc = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let found = false;
+
+  for (const m of thread) {
+    if (m.role !== 'assistant') continue;
+    const usage = getMessageUsage(m);
+    if (!usage) continue;
+    const t = usage.tokens;
+    if (t.input <= 0 && t.output <= 0) continue;
+    input += t.input;
+    output += t.output;
+    reasoning += t.reasoning;
+    totalAcc += t.total ?? 0;
+    cacheRead += t.cache?.read ?? 0;
+    cacheWrite += t.cache?.write ?? 0;
+    found = true;
+  }
+
+  if (!found) return null;
+  return { input, output, reasoning, total: totalAcc || undefined, cache: { read: cacheRead, write: cacheWrite } };
 }
 
-function formatContextPercent(message?: MessageInfo): string {
-  const value = getMessageUsage(message)?.contextPercent;
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
-  return `ctx ${Math.round(value)}%`;
+function getThreadContextPercent(root: MessageInfo): number | null {
+  if (!props.computeContextPercent) return null;
+  const thread = getThread(root.id);
+  let lastUsage: MessageUsage | undefined;
+
+  for (const m of thread) {
+    if (m.role !== 'assistant') continue;
+    const usage = getMessageUsage(m);
+    if (usage && (usage.tokens.input > 0 || usage.tokens.output > 0)) {
+      lastUsage = usage;
+    }
+  }
+
+  if (!lastUsage) return null;
+  const value = props.computeContextPercent(lastUsage.tokens, lastUsage.providerId, lastUsage.modelId);
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  return value;
+}
+
+function formatTokenCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n < 1000) return String(n);
+  if (n < 10_000) return (n / 1000).toFixed(1) + 'K';
+  if (n < 1_000_000) return Math.round(n / 1000) + 'K';
+  return (n / 1_000_000).toFixed(1) + 'M';
+}
+
+function contextSeverityClass(percent: number): string {
+  if (percent >= 90) return 'ib-ctx-critical';
+  if (percent >= 75) return 'ib-ctx-high';
+  if (percent >= 50) return 'ib-ctx-moderate';
+  return 'ib-ctx-low';
 }
 
 function formatMessageTime(value?: number) {
@@ -992,9 +1066,36 @@ defineExpose({ panelEl });
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
+
+.ib-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ib-meta-tokens {
+  gap: 6px;
+}
+
+.ib-token-in,
+.ib-token-out,
+.ib-token-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+
+
+.ib-ctx-low { color: rgba(96, 165, 250, 0.7); }
+.ib-ctx-moderate { color: rgba(251, 191, 36, 0.8); }
+.ib-ctx-high { color: rgba(249, 115, 22, 0.85); }
+.ib-ctx-critical { color: rgba(248, 113, 113, 0.9); }
 
 .ib-top-right {
   float: right;

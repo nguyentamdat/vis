@@ -39,6 +39,7 @@
                 :busy-descendant-count="busyDescendantSessionIds.length"
                 :theme="shikiTheme"
                 :resolve-agent-color="resolveAgentColorForName"
+                :compute-context-percent="computeContextPercent"
                 @message-rendered="handleOutputPanelMessageRendered"
                 @resume-follow="handleOutputPanelResumeFollow"
                 @fork-message="handleForkMessage"
@@ -3255,7 +3256,7 @@ function computeContextPercent(tokens: MessageTokens, providerId?: string, model
   const limit = resolveProviderModelLimit(providerId, modelId);
   const contextLimit = limit?.context;
   if (!contextLimit || !Number.isFinite(contextLimit) || contextLimit <= 0) return null;
-  const total = tokens.input + tokens.output + tokens.reasoning;
+  const total = tokens.total ?? (tokens.input + tokens.output + (tokens.cache?.read ?? 0) + (tokens.cache?.write ?? 0));
   if (!Number.isFinite(total) || total <= 0) return 0;
   return Math.round((total / contextLimit) * 100);
 }

@@ -64,6 +64,7 @@ function normalizeTokens(value: unknown): MessageUsage['tokens'] | undefined {
   const output = asNumber(rec.output);
   const reasoning = asNumber(rec.reasoning);
   if (input === undefined || output === undefined || reasoning === undefined) return undefined;
+  const total = asNumber(rec.total);
   const cacheRec = toRecord(rec.cache);
   const cacheRead = asNumber(cacheRec?.read);
   const cacheWrite = asNumber(cacheRec?.write);
@@ -71,6 +72,7 @@ function normalizeTokens(value: unknown): MessageUsage['tokens'] | undefined {
     input,
     output,
     reasoning,
+    total,
     cache:
       cacheRead === undefined || cacheWrite === undefined
         ? undefined
@@ -324,6 +326,13 @@ function getTime(id: string): number | undefined {
   return asNumber(info.time.created);
 }
 
+function getCompletedTime(id: string): number | undefined {
+  const info = get(id);
+  if (!info) return undefined;
+  if (info.role === 'assistant') return asNumber(info.time.completed) ?? asNumber(info.time.created);
+  return asNumber(info.time.created);
+}
+
 function getChildren(parentId: string): MessageInfo[] {
   const result: MessageInfo[] = [];
   for (const messageRef of messages.value.values()) {
@@ -434,6 +443,7 @@ export function useMessages() {
     getProviderId,
     getModelId,
     getTime,
+    getCompletedTime,
     getChildren,
     getThread,
     getFinalAnswer,
