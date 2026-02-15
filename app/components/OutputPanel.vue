@@ -209,6 +209,7 @@ import { Transition, computed, nextTick, onBeforeUnmount, onMounted, reactive, r
 import MessageViewer from './MessageViewer.vue';
 import { renderWorkerHtml } from '../utils/workerRenderer';
 import { useAutoScroller } from '../composables/useAutoScroller';
+import { useMessages } from '../composables/useMessages';
 import type { MessageAttachment, MessageDiffEntry, MessageStatus, MessageUsage } from '../types/message';
 import type { MessageInfo, MessagePart, ToolPart } from '../types/sse';
 
@@ -220,21 +221,9 @@ type HistoryEntry =
 
 const HISTORY_TOOL_NAMES = new Set(['bash', 'write', 'edit', 'multiedit', 'apply_patch']);
 
+const msg = useMessages();
+
 const props = defineProps<{
-  roots?: MessageInfo[];
-  getChildren?: (parentId: string) => MessageInfo[];
-  getThread?: (rootId: string) => MessageInfo[];
-  getFinalAnswer?: (rootId: string) => MessageInfo | undefined;
-  hasTextContent?: (messageId: string) => boolean;
-  getTextContent?: (messageId: string) => string;
-  getImageAttachments?: (messageId: string) => MessageAttachment[] | undefined;
-  getStatus?: (messageId: string) => MessageStatus;
-  getUsage?: (messageId: string) => MessageUsage | undefined;
-  getError?: (messageId: string) => { name: string; message: string } | null;
-  getDiffs?: (messageId: string) => MessageDiffEntry[] | undefined;
-  getModelPath?: (messageId: string) => string | undefined;
-  getTime?: (messageId: string) => number | undefined;
-  getParts?: (messageId: string) => MessagePart[];
   isFollowing: boolean;
   statusText: string;
   isStatusError: boolean;
@@ -270,95 +259,63 @@ function followDebug(event: string, detail?: Record<string, unknown>) {
   console.debug(`[output-panel] ${event}`, { t });
 }
 
-const visibleRoots = computed(() => props.roots ?? []);
+const visibleRoots = computed(() => msg.roots.value);
 
 function getThread(rootId: string): MessageInfo[] {
-  if (props.getThread) return props.getThread(rootId);
-  const root = visibleRoots.value.find((item) => item.id === rootId);
-  return root ? [root] : [];
+  return msg.getThread(rootId);
 }
 
 function getChildren(parentId: string): MessageInfo[] {
-  if (props.getChildren) return props.getChildren(parentId);
-  return [];
+  return msg.getChildren(parentId);
 }
 
 function getFinalAnswer(root: MessageInfo): MessageInfo | undefined {
-  if (props.getFinalAnswer) return props.getFinalAnswer(root.id);
-  const assistants = getThread(root.id).filter((msg) => msg.role === 'assistant' && hasTextContent(msg));
-  return assistants[assistants.length - 1];
+  return msg.getFinalAnswer(root.id);
 }
 
 function hasTextContent(message?: MessageInfo): boolean {
   if (!message) return false;
-  if (props.hasTextContent) return props.hasTextContent(message.id);
-  return getMessageContent(message).length > 0;
+  return msg.hasTextContent(message.id);
 }
 
 function getMessageContent(message?: MessageInfo): string {
   if (!message) return '';
-  return props.getTextContent ? props.getTextContent(message.id) : '';
+  return msg.getTextContent(message.id);
 }
 
 function getMessageAttachments(message?: MessageInfo): MessageAttachment[] {
-  if (!message || !props.getImageAttachments) return [];
-  return props.getImageAttachments(message.id) ?? [];
+  if (!message) return [];
+  return msg.getImageAttachments(message.id) ?? [];
 }
 
 function getMessageStatus(message?: MessageInfo): MessageStatus {
   if (!message) return 'streaming';
-  if (props.getStatus) return props.getStatus(message.id);
-  if (message.role === 'user') return 'complete';
-  if (message.error || message.finish === 'error') return 'error';
-  if (message.time.completed !== undefined || message.finish) return 'complete';
-  return 'streaming';
+  return msg.getStatus(message.id);
 }
 
 function getMessageError(message?: MessageInfo): { name: string; message: string } | null {
   if (!message) return null;
-  if (props.getError) return props.getError(message.id);
-  if (message.role !== 'assistant' || !message.error) return null;
-  const data = message.error.data as Record<string, unknown> | undefined;
-  const value = typeof data?.message === 'string' ? data.message : '';
-  return { name: message.error.name, message: value };
+  return msg.getError(message.id);
 }
 
 function getMessageUsage(message?: MessageInfo): MessageUsage | undefined {
-  if (!message || !props.getUsage) return undefined;
-  return props.getUsage(message.id);
+  if (!message) return undefined;
+  return msg.getUsage(message.id);
 }
 
 function getMessageDiffEntries(message?: MessageInfo): DiffEntry[] {
   if (!message) return [];
-  if (props.getDiffs) return props.getDiffs(message.id) ?? [];
-  if (message.role !== 'user' || !Array.isArray(message.summary?.diffs)) return [];
-  return message.summary.diffs
-    .filter((item) => Boolean(item.file))
-    .map((item) => ({
-      file: item.file,
-      diff: '',
-      before: item.before,
-      after: item.after,
-    }));
+  return msg.getDiffs(message.id) ?? [];
 }
 
 function getMessageModelPath(message?: MessageInfo): string {
   if (!message) return '';
-  if (props.getModelPath) return props.getModelPath(message.id) ?? '';
-  if (message.role === 'assistant') {
-    if (message.providerID && message.modelID) return `${message.providerID}/${message.modelID}`;
-    return message.modelID || message.providerID || '';
-  }
-  const providerId = message.model.providerID;
-  const modelId = message.model.modelID;
-  if (providerId && modelId) return `${providerId}/${modelId}`;
-  return modelId || providerId || '';
+  return msg.getModelPath(message.id) ?? '';
 }
 
 function getMessageTime(message?: MessageInfo): number | undefined {
   if (!message) return undefined;
-  if (props.getTime) return props.getTime(message.id);
-  return typeof message.time.created === 'number' ? message.time.created : undefined;
+  return msg.getTime(message.id);
 }
 
 function getFinalAnswerContent(root: MessageInfo): string {
@@ -392,13 +349,12 @@ function getToolPartTime(part: ToolPart): number {
 function getHistoryEntries(root: MessageInfo): HistoryEntry[] {
   const entries: HistoryEntry[] = [];
   const thread = getThread(root.id);
-  for (const msg of thread) {
-    if (msg.role !== 'assistant') continue;
-    if (hasTextContent(msg)) {
-      entries.push({ kind: 'message', message: msg, time: msg.time.created });
+  for (const msgInfo of thread) {
+    if (msgInfo.role !== 'assistant') continue;
+    if (hasTextContent(msgInfo)) {
+      entries.push({ kind: 'message', message: msgInfo, time: msgInfo.time.created });
     }
-    if (!props.getParts) continue;
-    const parts = props.getParts(msg.id);
+    const parts = msg.getParts(msgInfo.id);
     for (const part of parts) {
       if (part.type !== 'tool') continue;
       if (!HISTORY_TOOL_NAMES.has(part.tool)) continue;

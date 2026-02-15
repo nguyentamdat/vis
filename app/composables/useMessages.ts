@@ -1,4 +1,4 @@
-import { computed, onUnmounted, readonly, shallowRef, triggerRef } from 'vue';
+import { computed, readonly, shallowRef, triggerRef } from 'vue';
 import type { ShallowRef } from 'vue';
 import type {
   MessageAttachment,
@@ -123,243 +123,78 @@ function byTimeThenId(a: MessageInfo, b: MessageInfo): number {
   return a.id.localeCompare(b.id);
 }
 
-export function useMessages(scope: SessionScope) {
-  const acc = useDeltaAccumulator();
-  const messages = shallowRef(new Map<string, ShallowRef<MessageEntry>>());
-  const parts = new Map<string, ShallowRef<MessagePart>>();
+// Module-level singleton state
+const acc = useDeltaAccumulator();
+const messages = shallowRef(new Map<string, ShallowRef<MessageEntry>>());
+const parts = new Map<string, ShallowRef<MessagePart>>();
 
-  function ensureMessage(id: string, notifyCollection = true): ShallowRef<MessageEntry> {
-    let ref = messages.value.get(id);
-    if (ref) return ref;
-    ref = shallowRef(createMessageEntry());
-    messages.value.set(id, ref);
-    if (notifyCollection) triggerRef(messages);
-    return ref;
-  }
-
-  function partLookupKey(messageId: string, partId: string): string {
-    return `${messageId}:${partId}`;
-  }
-
-  function updateMessage(info: MessageInfo, notifyCollection = true) {
-    const messageRef = ensureMessage(info.id, notifyCollection);
-    messageRef.value.info = info;
-    triggerRef(messageRef);
-  }
-
-  function updatePart(part: MessagePart, notifyCollection = true) {
-    const key = partLookupKey(part.messageID, part.id);
-    const existing = parts.get(key);
-    if (existing) {
-      existing.value = part;
-      triggerRef(existing);
-      return;
-    }
-    const partRef = shallowRef(part);
-    parts.set(key, partRef);
-    const messageRef = ensureMessage(part.messageID, notifyCollection);
-    messageRef.value.parts.add(partRef);
-    triggerRef(messageRef);
-  }
-
-  function get(id: string): MessageInfo | undefined {
-    return messages.value.get(id)?.value.info;
-  }
-
-  function getParts(id: string): MessagePart[] {
-    const messageRef = messages.value.get(id);
-    if (!messageRef) return [];
-    const result: MessagePart[] = [];
-    for (const partRef of messageRef.value.parts) {
-      result.push(partRef.value);
-    }
-    return result;
-  }
-
-  function getPartsByType<T extends MessagePart['type']>(
-    id: string,
-    type: T,
-  ): Array<Extract<MessagePart, { type: T }>> {
-    const result: Array<Extract<MessagePart, { type: T }>> = [];
-    const messageRef = messages.value.get(id);
-    if (!messageRef) return result;
-    for (const partRef of messageRef.value.parts) {
-      const part = partRef.value;
-      if (part.type !== type) continue;
-      result.push(part as Extract<MessagePart, { type: T }>);
-    }
-    return result;
-  }
-
-  function hasTextContent(id: string): boolean {
-    const messageRef = messages.value.get(id);
-    if (!messageRef) return false;
-    for (const partRef of messageRef.value.parts) {
-      const part = partRef.value;
-      if (part.type === 'text' && part.text) return true;
-    }
-    return false;
-  }
-
-  function getTextContent(id: string): string {
-    const chunks: string[] = [];
-    const textParts = getPartsByType(id, 'text');
-    for (const part of textParts) {
-      if (!part.text) continue;
-      chunks.push(part.text);
-    }
-    return chunks.join('');
-  }
-
-  function getImageAttachments(id: string): MessageAttachment[] | undefined {
-    const files = getPartsByType(id, 'file');
-    if (files.length === 0) return undefined;
-    const result: MessageAttachment[] = [];
-    let index = 0;
-    for (const part of files) {
-      if (!part.mime.startsWith('image/')) continue;
-      result.push({
-        id: part.id,
-        url: part.url,
-        mime: part.mime,
-        filename: part.filename ?? `attachment-${index + 1}`,
-      });
-      index += 1;
-    }
-    return result.length > 0 ? result : undefined;
-  }
-
-  function getUsage(id: string): MessageUsage | undefined {
-    return normalizeUsage(get(id));
-  }
-
-  function getStatus(id: string): MessageStatus {
-    return resolveStatus(get(id));
-  }
-
-  function getError(id: string): MessageError {
-    return resolveError(get(id));
-  }
-
-  function getDiffs(id: string): MessageDiffEntry[] | undefined {
-    const info = get(id);
-    if (!info || info.role !== 'user' || !Array.isArray(info.summary?.diffs)) return undefined;
-    const result: MessageDiffEntry[] = [];
-    for (const diff of info.summary.diffs) {
-      if (!diff.file) continue;
-      result.push({
-        file: diff.file,
-        diff: '',
-        before: diff.before,
-        after: diff.after,
-      });
-    }
-    return result.length > 0 ? result : undefined;
-  }
-
-  function getModelPath(id: string): string | undefined {
-    const info = get(id);
-    if (!info) return undefined;
-    const providerId = getProviderId(info);
-    const modelId = getModelId(info);
-    if (providerId && modelId) return `${providerId}/${modelId}`;
-    return modelId || providerId;
-  }
-
-  function getTime(id: string): number | undefined {
-    const info = get(id);
-    if (!info) return undefined;
-    return asNumber(info.time.created);
-  }
-
-  function getChildren(parentId: string): MessageInfo[] {
-    const result: MessageInfo[] = [];
-    for (const messageRef of messages.value.values()) {
-      const info = messageRef.value.info;
-      if (!info || info.role !== 'assistant') continue;
-      if (info.parentID !== parentId) continue;
+const roots = computed(() => {
+  const result: MessageInfo[] = [];
+  for (const messageRef of messages.value.values()) {
+    const info = messageRef.value.info;
+    if (!info) continue;
+    if (info.role === 'user') {
       result.push(info);
+      continue;
     }
-    return result.sort(byTimeThenId);
+    const parent = messages.value.get(info.parentID)?.value.info;
+    if (!parent) result.push(info);
   }
+  return result.sort(byTimeThenId);
+});
 
-  function getThread(rootId: string): MessageInfo[] {
-    const root = get(rootId);
-    if (!root) return [];
-    const result: MessageInfo[] = [];
-    const queue: string[] = [rootId];
-    const visited = new Set<string>();
-    while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current || visited.has(current)) continue;
-      visited.add(current);
-      const info = get(current);
-      if (!info) continue;
-      result.push(info);
-      const children = getChildren(current);
-      for (const child of children) queue.push(child.id);
-    }
-    return result.sort(byTimeThenId);
+const streaming = computed(() => {
+  const result: MessageInfo[] = [];
+  for (const messageRef of messages.value.values()) {
+    const info = messageRef.value.info;
+    if (!info) continue;
+    if (resolveStatus(info) !== 'streaming') continue;
+    result.push(info);
   }
+  return result.sort(byTimeThenId);
+});
 
-  function getFinalAnswer(rootId: string): MessageInfo | undefined {
-    const thread = getThread(rootId);
-    const assistants = thread
-      .filter((message) => message.role === 'assistant' && hasTextContent(message.id))
-      .sort(byTimeThenId);
-    return assistants[assistants.length - 1];
+function ensureMessage(id: string, notifyCollection = true): ShallowRef<MessageEntry> {
+  let ref = messages.value.get(id);
+  if (ref) return ref;
+  ref = shallowRef(createMessageEntry());
+  messages.value.set(id, ref);
+  if (notifyCollection) triggerRef(messages);
+  return ref;
+}
+
+function partLookupKey(messageId: string, partId: string): string {
+  return `${messageId}:${partId}`;
+}
+
+function updateMessage(info: MessageInfo, notifyCollection = true) {
+  const messageRef = ensureMessage(info.id, notifyCollection);
+  messageRef.value.info = info;
+  triggerRef(messageRef);
+}
+
+function updatePart(part: MessagePart, notifyCollection = true) {
+  const key = partLookupKey(part.messageID, part.id);
+  const existing = parts.get(key);
+  if (existing) {
+    existing.value = part;
+    triggerRef(existing);
+    return;
   }
+  const partRef = shallowRef(part);
+  parts.set(key, partRef);
+  const messageRef = ensureMessage(part.messageID, notifyCollection);
+  messageRef.value.parts.add(partRef);
+  triggerRef(messageRef);
+}
 
-  function loadHistory(entries: unknown[]) {
-    let collectionChanged = false;
-    for (const entry of entries) {
-      const rec = toRecord(entry);
-      if (!rec) continue;
-      const info = rec.info;
-      const partsList = rec.parts;
-      if (!isMessageInfo(info)) continue;
-      const accumulated = acc.getMessage(info.id);
-      const hasMessage = messages.value.has(info.id);
-      const messageRef = ensureMessage(info.id, false);
-      if (!hasMessage) collectionChanged = true;
-      if (!messageRef.value.info) {
-        messageRef.value.info = accumulated?.info ?? info;
-        triggerRef(messageRef);
-      }
-      if (!Array.isArray(partsList)) continue;
-      let addedPart = false;
-      for (const item of partsList) {
-        if (!isMessagePart(item)) continue;
-        const merged = accumulated?.parts.get(item.id) ?? item;
-        const key = partLookupKey(merged.messageID, merged.id);
-        if (parts.has(key)) continue;
-        const partRef = shallowRef(merged);
-        parts.set(key, partRef);
-        messageRef.value.parts.add(partRef);
-        addedPart = true;
-      }
-      if (accumulated) {
-        for (const [partId, accPart] of accumulated.parts) {
-          const key = partLookupKey(accPart.messageID, partId);
-          if (parts.has(key)) continue;
-          const partRef = shallowRef(accPart);
-          parts.set(key, partRef);
-          messageRef.value.parts.add(partRef);
-          addedPart = true;
-        }
-      }
-      if (addedPart) triggerRef(messageRef);
-    }
-    if (collectionChanged) triggerRef(messages);
-  }
+const unsubs: Array<() => void> = [];
 
-  function reset() {
-    messages.value.clear();
-    parts.clear();
-    triggerRef(messages);
-  }
+function bindScope(scope: SessionScope) {
+  for (const unsub of unsubs) unsub();
+  unsubs.length = 0;
 
-  const unsubscribers = [
+  unsubs.push(
     scope.on('message.part.updated', (packet: MessagePartUpdatedPacket) => {
       updatePart(packet.part);
     }),
@@ -376,40 +211,211 @@ export function useMessages(scope: SessionScope) {
     scope.on('message.updated', (packet: MessageUpdatedPacket) => {
       updateMessage(packet.info);
     }),
-  ];
+  );
+}
 
-  function dispose() {
-    for (const unsubscribe of unsubscribers) unsubscribe();
+function get(id: string): MessageInfo | undefined {
+  return messages.value.get(id)?.value.info;
+}
+
+function getParts(id: string): MessagePart[] {
+  const messageRef = messages.value.get(id);
+  if (!messageRef) return [];
+  const result: MessagePart[] = [];
+  for (const partRef of messageRef.value.parts) {
+    result.push(partRef.value);
   }
+  return result;
+}
 
-  onUnmounted(dispose);
+function getPartsByType<T extends MessagePart['type']>(
+  id: string,
+  type: T,
+): Array<Extract<MessagePart, { type: T }>> {
+  const result: Array<Extract<MessagePart, { type: T }>> = [];
+  const messageRef = messages.value.get(id);
+  if (!messageRef) return result;
+  for (const partRef of messageRef.value.parts) {
+    const part = partRef.value;
+    if (part.type !== type) continue;
+    result.push(part as Extract<MessagePart, { type: T }>);
+  }
+  return result;
+}
 
-  const roots = computed(() => {
-    const result: MessageInfo[] = [];
-    for (const messageRef of messages.value.values()) {
-      const info = messageRef.value.info;
-      if (!info) continue;
-      if (info.role === 'user') {
-        result.push(info);
-        continue;
+function hasTextContent(id: string): boolean {
+  const messageRef = messages.value.get(id);
+  if (!messageRef) return false;
+  for (const partRef of messageRef.value.parts) {
+    const part = partRef.value;
+    if (part.type === 'text' && part.text) return true;
+  }
+  return false;
+}
+
+function getTextContent(id: string): string {
+  const chunks: string[] = [];
+  const textParts = getPartsByType(id, 'text');
+  for (const part of textParts) {
+    if (!part.text) continue;
+    chunks.push(part.text);
+  }
+  return chunks.join('');
+}
+
+function getImageAttachments(id: string): MessageAttachment[] | undefined {
+  const files = getPartsByType(id, 'file');
+  if (files.length === 0) return undefined;
+  const result: MessageAttachment[] = [];
+  let index = 0;
+  for (const part of files) {
+    if (!part.mime.startsWith('image/')) continue;
+    result.push({
+      id: part.id,
+      url: part.url,
+      mime: part.mime,
+      filename: part.filename ?? `attachment-${index + 1}`,
+    });
+    index += 1;
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function getUsage(id: string): MessageUsage | undefined {
+  return normalizeUsage(get(id));
+}
+
+function getStatus(id: string): MessageStatus {
+  return resolveStatus(get(id));
+}
+
+function getError(id: string): MessageError {
+  return resolveError(get(id));
+}
+
+function getDiffs(id: string): MessageDiffEntry[] | undefined {
+  const info = get(id);
+  if (!info || info.role !== 'user' || !Array.isArray(info.summary?.diffs)) return undefined;
+  const result: MessageDiffEntry[] = [];
+  for (const diff of info.summary.diffs) {
+    if (!diff.file) continue;
+    result.push({
+      file: diff.file,
+      diff: '',
+      before: diff.before,
+      after: diff.after,
+    });
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function getModelPath(id: string): string | undefined {
+  const info = get(id);
+  if (!info) return undefined;
+  const providerId = getProviderId(info);
+  const modelId = getModelId(info);
+  if (providerId && modelId) return `${providerId}/${modelId}`;
+  return modelId || providerId;
+}
+
+function getTime(id: string): number | undefined {
+  const info = get(id);
+  if (!info) return undefined;
+  return asNumber(info.time.created);
+}
+
+function getChildren(parentId: string): MessageInfo[] {
+  const result: MessageInfo[] = [];
+  for (const messageRef of messages.value.values()) {
+    const info = messageRef.value.info;
+    if (!info || info.role !== 'assistant') continue;
+    if (info.parentID !== parentId) continue;
+    result.push(info);
+  }
+  return result.sort(byTimeThenId);
+}
+
+function getThread(rootId: string): MessageInfo[] {
+  const root = get(rootId);
+  if (!root) return [];
+  const result: MessageInfo[] = [];
+  const queue: string[] = [rootId];
+  const visited = new Set<string>();
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || visited.has(current)) continue;
+    visited.add(current);
+    const info = get(current);
+    if (!info) continue;
+    result.push(info);
+    const children = getChildren(current);
+    for (const child of children) queue.push(child.id);
+  }
+  return result.sort(byTimeThenId);
+}
+
+function getFinalAnswer(rootId: string): MessageInfo | undefined {
+  const thread = getThread(rootId);
+  const assistants = thread
+    .filter((message) => message.role === 'assistant' && hasTextContent(message.id))
+    .sort(byTimeThenId);
+  return assistants[assistants.length - 1];
+}
+
+function loadHistory(entries: unknown[]) {
+  let collectionChanged = false;
+  for (const entry of entries) {
+    const rec = toRecord(entry);
+    if (!rec) continue;
+    const info = rec.info;
+    const partsList = rec.parts;
+    if (!isMessageInfo(info)) continue;
+    const accumulated = acc.getMessage(info.id);
+    const hasMessage = messages.value.has(info.id);
+    const messageRef = ensureMessage(info.id, false);
+    if (!hasMessage) collectionChanged = true;
+    if (!messageRef.value.info) {
+      messageRef.value.info = accumulated?.info ?? info;
+      triggerRef(messageRef);
+    }
+    if (!Array.isArray(partsList)) continue;
+    let addedPart = false;
+    for (const item of partsList) {
+      if (!isMessagePart(item)) continue;
+      const merged = accumulated?.parts.get(item.id) ?? item;
+      const key = partLookupKey(merged.messageID, merged.id);
+      if (parts.has(key)) continue;
+      const partRef = shallowRef(merged);
+      parts.set(key, partRef);
+      messageRef.value.parts.add(partRef);
+      addedPart = true;
+    }
+    if (accumulated) {
+      for (const [partId, accPart] of accumulated.parts) {
+        const key = partLookupKey(accPart.messageID, partId);
+        if (parts.has(key)) continue;
+        const partRef = shallowRef(accPart);
+        parts.set(key, partRef);
+        messageRef.value.parts.add(partRef);
+        addedPart = true;
       }
-      const parent = messages.value.get(info.parentID)?.value.info;
-      if (!parent) result.push(info);
     }
-    return result.sort(byTimeThenId);
-  });
+    if (addedPart) triggerRef(messageRef);
+  }
+  if (collectionChanged) triggerRef(messages);
+}
 
-  const streaming = computed(() => {
-    const result: MessageInfo[] = [];
-    for (const messageRef of messages.value.values()) {
-      const info = messageRef.value.info;
-      if (!info) continue;
-      if (resolveStatus(info) !== 'streaming') continue;
-      result.push(info);
-    }
-    return result.sort(byTimeThenId);
-  });
+function reset() {
+  messages.value.clear();
+  parts.clear();
+  triggerRef(messages);
+}
 
+function dispose() {
+  for (const unsub of unsubs) unsub();
+}
+
+export function useMessages() {
   return {
     messages: readonly(messages),
     roots,
@@ -436,5 +442,6 @@ export function useMessages(scope: SessionScope) {
     loadHistory,
     reset,
     dispose,
+    bindScope,
   };
 }

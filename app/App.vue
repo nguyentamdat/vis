@@ -29,20 +29,6 @@
                 ref="outputPanelRef"
                 :key="selectedSessionId"
                 class="output-panel"
-                :roots="msg.roots.value"
-                :get-children="msg.getChildren"
-                :get-thread="msg.getThread"
-                :get-final-answer="msg.getFinalAnswer"
-                :has-text-content="msg.hasTextContent"
-                :get-text-content="msg.getTextContent"
-                :get-parts="msg.getParts"
-                :get-image-attachments="msg.getImageAttachments"
-                :get-status="msg.getStatus"
-                :get-usage="msg.getUsage"
-                :get-error="msg.getError"
-                :get-diffs="msg.getDiffs"
-                :get-model-path="msg.getModelPath"
-                :get-time="msg.getTime"
                 :is-following="isFollowing"
                 :status-text="statusText"
                 :is-status-error="isStatusError"
@@ -4527,7 +4513,8 @@ const deltaAccumulator = useDeltaAccumulator();
 deltaAccumulator.listen(ge);
 const sessionScope = ge.session(selectedSessionId, sessionParentRecord);
 const mainSessionScope = ge.mainSession(selectedSessionId);
-const msg = useMessages(sessionScope);
+const msg = useMessages();
+msg.bindScope(sessionScope);
 reasoning.bindScope(sessionScope);
 
 watch(selectedSessionId, reloadSelectedSessionState, { immediate: true });
