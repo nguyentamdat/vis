@@ -1502,10 +1502,6 @@ function restoreComposerDraftForContext(contextKey: string): boolean {
   if (!contextKey) return false;
   const draft = readComposerDraft(contextKey);
   if (!draft) return false;
-  if (!hasRestorableComposerContent(draft)) {
-    clearComposerInputState();
-    return false;
-  }
   applyComposerDraftToComposerState(draft, contextKey);
   return true;
 }
@@ -1660,11 +1656,6 @@ function handleComposerDraftStorage(event: StorageEvent) {
   const draft = store[contextKey] ?? null;
   const knownRev = composerDraftRevisionByContext.get(contextKey) ?? 0;
   if (!draft) {
-    composerDraftRevisionByContext.delete(contextKey);
-    clearComposerInputState();
-    return;
-  }
-  if (!hasRestorableComposerContent(draft)) {
     composerDraftRevisionByContext.delete(contextKey);
     clearComposerInputState();
     return;
@@ -2515,8 +2506,6 @@ async function createWorktreeFromWorktree(worktree: string) {
             sessionGraphStore.setSandboxProjectID(data.directory, session.projectID);
             markSessionGraphChanged();
           }
-          resolveDefaultAgentModel();
-          persistComposerDraftForCurrentContext();
         }
       } catch (sessionCreateError) {
         sessionError.value = `Session create failed: ${toErrorMessage(sessionCreateError)}`;
@@ -2573,8 +2562,6 @@ async function createNewSession() {
         sessionGraphStore.setSandboxProjectID(activeDirectory.value || data.directory || '', data.projectID);
         markSessionGraphChanged();
       }
-      resolveDefaultAgentModel();
-      persistComposerDraftForCurrentContext();
       if (data.directory) activeDirectory.value = data.directory;
     }
     void refreshSessionsForDirectory(activeDirectory.value || undefined);
