@@ -452,7 +452,7 @@ const outputEl = ref<HTMLElement | null>(null);
 const inputEl = ref<HTMLElement | null>(null);
 const toolWindowCanvasEl = ref<HTMLDivElement | null>(null);
 const outputPanelRef = ref<{ panelEl: HTMLDivElement | null; isHistoryOpen: boolean; closeHistory: () => void } | null>(null);
-const topPanelRef = ref<{ openSessionDropdown: () => void } | null>(null);
+const topPanelRef = ref<{ openSessionDropdown: () => void; closeSessionDropdown: () => void; toggleSessionDropdown: () => void } | null>(null);
 const inputPanelRef = ref<{ focus: () => void; reset: () => void } | null>(null);
 const outputPanelContainerEl = computed(() => outputPanelRef.value?.panelEl ?? undefined);
 const outputPanelScrollMode = computed<ScrollMode>(() => 'follow');
@@ -4228,12 +4228,14 @@ function handleGlobalKeydown(event: KeyboardEvent) {
     const now = Date.now();
     if (now - lastCtrlGTime < DOUBLE_CTRL_G_THRESHOLD) {
       lastCtrlGTime = 0;
+      topPanelRef.value?.closeSessionDropdown();
       if (notificationSessions.value.length > 0) {
         handleNotificationSessionSelect();
       }
+      focusInput();
     } else {
       lastCtrlGTime = now;
-      topPanelRef.value?.openSessionDropdown();
+      topPanelRef.value?.toggleSessionDropdown();
     }
     return;
   }

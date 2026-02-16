@@ -264,7 +264,15 @@ function openSessionDropdown() {
   treeDropdownOpen.value = true;
 }
 
-defineExpose({ openSessionDropdown });
+function closeSessionDropdown() {
+  treeDropdownOpen.value = false;
+}
+
+function toggleSessionDropdown() {
+  treeDropdownOpen.value = !treeDropdownOpen.value;
+}
+
+defineExpose({ openSessionDropdown, closeSessionDropdown, toggleSessionDropdown });
 
 function onMenuSelect(value: unknown) {
   if (value === 'settings') emit('open-settings');
