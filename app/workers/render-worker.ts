@@ -103,6 +103,14 @@ async function tryLoadLanguage(
   }
 }
 
+function safeCodeToHtml(highlighter: Highlighter, code: string, lang: string, theme: string): string {
+  try {
+    return highlighter.codeToHtml(code, { lang, theme });
+  } catch {
+    return highlighter.codeToHtml(code, { lang: 'text', theme });
+  }
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -617,8 +625,8 @@ function buildDiffHtmlFromCode(
     const trimmedAfter =
       maxNew > 0 ? effectiveAfter.split('\n').slice(0, maxNew).join('\n') : effectiveAfter;
 
-    const beforeHtml = highlighter.codeToHtml(trimmedBefore, { lang: resolvedLang, theme });
-    const afterHtml = highlighter.codeToHtml(trimmedAfter, { lang: resolvedLang, theme });
+    const beforeHtml = safeCodeToHtml(highlighter, trimmedBefore, resolvedLang, theme);
+    const afterHtml = safeCodeToHtml(highlighter, trimmedAfter, resolvedLang, theme);
     const beforeLines = extractShikiLines(beforeHtml);
     const afterLines = extractShikiLines(afterHtml);
     const diffLines = diff.split('\n');
@@ -692,7 +700,7 @@ function buildDiffHtmlFromCode(
 async function renderCodeHtml(request: RenderRequest) {
   const highlighter = await getHighlighter(request.theme);
   const resolvedLang = await resolveLanguage(highlighter, request.lang);
-  const html = highlighter.codeToHtml(request.code, { lang: resolvedLang, theme: request.theme });
+  const html = safeCodeToHtml(highlighter, request.code, resolvedLang, request.theme);
   let lines = extractShikiLines(html);
   const mode = request.gutterMode ?? 'single';
   let gutterLines = request.gutterLines;
@@ -800,6 +808,14 @@ function getMarkdownIt(highlighter: Highlighter, theme: string) {
     cachedMdShikiOptions = shikiOptions;
     cachedMd = new MarkdownIt({ html: false, linkify: false, breaks: true });
     cachedMd.use(fromHighlighter(highlighter, shikiOptions));
+    const shikiHighlight = cachedMd.options.highlight;
+    cachedMd.options.highlight = function (code, lang, attrs) {
+      try {
+        return shikiHighlight?.call(this, code, lang, attrs) ?? '';
+      } catch {
+        return safeCodeToHtml(highlighter, code, lang || 'text', theme);
+      }
+    };
   }
   if (!cachedMd || !cachedMdShikiOptions) {
     throw new Error('failed to initialize markdown renderer');
