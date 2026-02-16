@@ -177,9 +177,21 @@
                   />
                 </div>
               </div>
+              <!-- Reasoning entry -->
+              <div
+                v-else-if="entry.kind === 'reasoning'"
+                class="history-item history-item-reasoning"
+                @click.stop="emit('open-history-reasoning', { part: entry.part })"
+              >
+                <div class="history-meta">
+                  <span class="history-index">🤔</span>
+                  <span class="history-reasoning-badge">THOUGHT</span>
+                  <span class="history-time">{{ formatMessageTime(entry.time) }}</span>
+                </div>
+              </div>
               <!-- Tool entry -->
               <div
-                v-else
+                v-else-if="entry.kind === 'tool'"
                 class="history-item history-item-tool"
                 :style="{ '--tool-color': toolHeaderColor(entry.part.tool) }"
                 @click.stop="handleHistoryToolClick(entry.part)"
@@ -229,13 +241,14 @@ import { renderWorkerHtml } from '../utils/workerRenderer';
 import { useAutoScroller } from '../composables/useAutoScroller';
 import { useMessages } from '../composables/useMessages';
 import type { MessageAttachment, MessageDiffEntry, MessageStatus, MessageTokens, MessageUsage } from '../types/message';
-import type { MessageInfo, MessagePart, ToolPart } from '../types/sse';
+import type { MessageInfo, MessagePart, ReasoningPart, ToolPart } from '../types/sse';
 
 type DiffEntry = { file: string; diff: string; before?: string; after?: string };
 
 type HistoryEntry =
   | { kind: 'message'; message: MessageInfo; time: number }
-  | { kind: 'tool'; part: ToolPart; time: number };
+  | { kind: 'tool'; part: ToolPart; time: number }
+  | { kind: 'reasoning'; part: ReasoningPart; time: number };
 
 const HISTORY_TOOL_NAMES = new Set(['bash', 'write', 'edit', 'multiedit', 'apply_patch']);
 
@@ -263,6 +276,7 @@ const emit = defineEmits<{
   (event: 'show-message-diff', payload: { messageKey: string; diffs: DiffEntry[] }): void;
   (event: 'open-image', payload: { url: string; filename: string }): void;
   (event: 'open-history-tool', payload: { part: ToolPart }): void;
+  (event: 'open-history-reasoning', payload: { part: ReasoningPart }): void;
   (event: 'close-history-tools'): void;
   (event: 'message-rendered'): void;
   (event: 'content-resized'): void;
@@ -366,6 +380,12 @@ function getHistoryEntries(root: MessageInfo): HistoryEntry[] {
     }
     const parts = msg.getParts(msgInfo.id);
     for (const part of parts) {
+      if (part.type === 'reasoning') {
+        if (part.text) {
+          entries.push({ kind: 'reasoning', part, time: part.time.start });
+        }
+        continue;
+      }
       if (part.type !== 'tool') continue;
       if (!HISTORY_TOOL_NAMES.has(part.tool)) continue;
       if (part.state.status === 'pending') continue;
@@ -376,7 +396,9 @@ function getHistoryEntries(root: MessageInfo): HistoryEntry[] {
 }
 
 function getHistoryEntryKey(entry: HistoryEntry): string {
-  return entry.kind === 'message' ? `msg:${entry.message.id}` : `tool:${entry.part.callID}`;
+  if (entry.kind === 'message') return `msg:${entry.message.id}`;
+  if (entry.kind === 'reasoning') return `reasoning:${entry.part.id}`;
+  return `tool:${entry.part.callID}`;
 }
 
 function toolBadgeLabel(tool: string): string {
@@ -1317,6 +1339,32 @@ defineExpose({ panelEl, isHistoryOpen, closeHistory });
   padding: 10px;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.history-item-reasoning {
+  cursor: pointer;
+  border-color: color-mix(in srgb, #8b5cf6 40%, #1e293b);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.history-item-reasoning:hover {
+  border-color: color-mix(in srgb, #8b5cf6 60%, #1e293b);
+  background: color-mix(in srgb, #8b5cf6 6%, #020617);
+}
+
+.history-item-reasoning .history-meta {
+  background: color-mix(in srgb, #8b5cf6 18%, rgba(15, 23, 42, 0.95));
+  border-bottom: none;
+}
+
+.history-reasoning-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: rgba(88, 28, 135, 0.5);
+  color: #d8b4fe;
 }
 
 .history-item-tool {

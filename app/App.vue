@@ -48,6 +48,7 @@
                 @revert-message="handleRevertMessage"
                 @show-message-diff="handleShowMessageDiff"
                 @open-history-tool="handleOpenHistoryTool"
+                @open-history-reasoning="handleOpenHistoryReasoning"
                 @close-history-tools="handleCloseHistoryTools"
                 @edit-message="handleEditMessage"
                 @open-image="handleOpenImage"
@@ -274,7 +275,7 @@ import { useMessages } from './composables/useMessages';
 import { useReasoningWindows, type ReasoningFinish } from './composables/useReasoningWindows';
 import { useSubagentWindows } from './composables/useSubagentWindows';
 import { renderWorkerHtml } from './utils/workerRenderer';
-import type { MessageInfo, MessagePart, ToolPart } from './types/sse';
+import type { MessageInfo, MessagePart, ReasoningPart, ToolPart } from './types/sse';
 import { extractFileRead as extractToolFileRead, extractPatch as extractToolPatch } from './utils/toolRenderers';
 import * as opencodeApi from './utils/opencode';
 import { opencodeTheme, resolveTheme, resolveAgentColor } from './utils/theme';
@@ -5607,6 +5608,35 @@ function handleOpenHistoryTool(payload: { part: ToolPart }) {
 
 function handleCloseHistoryTools() {
   closeHistoryToolWindows();
+}
+
+function handleOpenHistoryReasoning(payload: { part: ReasoningPart }) {
+  closeHistoryToolWindows();
+  const { width, height } = fw.getExtent();
+  const winW = 600;
+  const winH = 400;
+  const x = Math.max(0, Math.round((width - winW) / 2));
+  const y = Math.max(0, Math.round((height - winH) / 2));
+  const key = `history-reasoning:${payload.part.id}`;
+  historyToolWindowKeys.add(key);
+  fw.open(key, {
+    component: ReasoningContent,
+    props: {
+      entries: [{ id: payload.part.id, text: payload.part.text }],
+      theme: 'github-dark',
+    },
+    title: '🤔 Thought',
+    scroll: 'manual',
+    closable: true,
+    resizable: true,
+    color: '#8b5cf6',
+    variant: 'message',
+    expiry: Infinity,
+    width: winW,
+    height: winH,
+    x,
+    y,
+  });
 }
 
 function handleOpenImage(payload: { url: string; filename: string }) {
