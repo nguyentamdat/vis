@@ -4421,9 +4421,6 @@ async function reloadSelectedSessionState() {
   if (selectedSessionId.value && isBootstrapping.value && !activeDirectory.value) {
     return;
   }
-  followDebug('reloadSelectedSessionState:start', {
-    selectedSessionId: selectedSessionId.value,
-  });
   const selected = sessions.value.find((session) => session.id === selectedSessionId.value);
   if (selected?.projectID) {
     const directory = selected.directory || activeDirectory.value || projectDirectory.value;
@@ -4577,15 +4574,6 @@ watch(
 );
 
 function log(..._args: unknown[]) {}
-
-function followDebug(event: string, detail?: Record<string, unknown>) {
-  const t = typeof performance !== 'undefined' ? Number(performance.now().toFixed(1)) : 0;
-  if (detail) {
-    console.debug(`[app-follow] ${event}`, { t, ...detail });
-    return;
-  }
-  console.debug(`[app-follow] ${event}`, { t });
-}
 
 const shikiTheme = ref('github-dark');
 

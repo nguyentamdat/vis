@@ -19,15 +19,6 @@ type ScrollFollowOptions = {
   enabled?: boolean;
 };
 
-function followDebug(event: string, detail?: Record<string, unknown>) {
-  const t = typeof performance !== 'undefined' ? Number(performance.now().toFixed(1)) : 0;
-  if (detail) {
-    console.debug(`[follow] ${event}`, { t, ...detail });
-    return;
-  }
-  console.debug(`[follow] ${event}`, { t });
-}
-
 export function useAutoScroller(
   containerEl: Ref<HTMLElement | undefined>,
   scrollMode: Ref<ScrollMode>,
@@ -55,9 +46,8 @@ export function useAutoScroller(
     return typeof performance !== 'undefined' ? performance.now() : Date.now();
   }
 
-  function markUserScrollIntent(source: string) {
+  function markUserScrollIntent(_source: string) {
     lastUserScrollIntentAt = nowMs();
-    followDebug('userScrollIntent', { source });
   }
 
   function hasRecentUserScrollIntent() {
@@ -83,36 +73,21 @@ export function useAutoScroller(
 
   function pauseTracking() {
     isTrackingPaused.value = true;
-    followDebug('pauseTracking');
   }
 
   function resumeTracking(options: { syncToBottom?: boolean } = {}) {
-    followDebug('resumeTracking:start', {
-      wasPaused: isTrackingPaused.value,
-      syncToBottom: Boolean(options.syncToBottom),
-      isFollowing: isFollowing.value,
-    });
     if (!isTrackingPaused.value) {
       if (options.syncToBottom) scrollToBottom(false);
-      followDebug('resumeTracking:already-active');
       return;
     }
     isTrackingPaused.value = false;
     if (options.syncToBottom) {
       isFollowing.value = true;
-      followDebug('resumeTracking:done', {
-        isFollowing: true,
-        syncToBottom: true,
-      });
       scrollToBottom(false);
     } else if (scrollMode.value === 'follow') {
       const el = containerEl.value;
       if (el) {
         isFollowing.value = isAtBottom(el);
-        followDebug('resumeTracking:done', {
-          isFollowing: isFollowing.value,
-          atBottom: isAtBottom(el),
-        });
       }
     }
   }
@@ -179,12 +154,6 @@ export function useAutoScroller(
     const target = el.scrollHeight - el.clientHeight;
     if (target <= 0) return;
     if (Math.abs(el.scrollTop - target) < 1) return;
-    followDebug('scrollToBottom:start', {
-      smooth,
-      from: el.scrollTop,
-      target,
-      isFollowing: isFollowing.value,
-    });
 
     if (!smooth) {
       clearNativeSmoothMonitor();
@@ -193,7 +162,6 @@ export function useAutoScroller(
       lastSetScrollTop = target;
       lastObservedScrollTop = target;
       lastObservedScrollHeight = el.scrollHeight;
-      followDebug('scrollToBottom:jump', { top: el.scrollTop, target });
       return;
     }
 
@@ -229,11 +197,6 @@ export function useAutoScroller(
         if (scrollMode.value === 'follow') {
           isFollowing.value = isAtBottom(el);
         }
-        followDebug('scrollToBottom:intervened', {
-          top: el.scrollTop,
-          lastSetScrollTop,
-          isFollowing: isFollowing.value,
-        });
         return;
       }
 
@@ -246,7 +209,6 @@ export function useAutoScroller(
         el.scrollTop = target;
         lastSetScrollTop = target;
         animating = false;
-        followDebug('scrollToBottom:raf-complete', { top: el.scrollTop, target });
         return;
       }
 
@@ -263,27 +225,15 @@ export function useAutoScroller(
 
   function scheduleAutoScroll(smooth: boolean) {
     if (isTrackingPaused.value) {
-      followDebug('scheduleAutoScroll:skip-paused', { smooth });
       return;
     }
     if (contentChangeScheduled) {
-      followDebug('scheduleAutoScroll:skip-queued', { smooth });
       return;
     }
     contentChangeScheduled = true;
-    followDebug('scheduleAutoScroll:queued', {
-      smooth,
-      mode: scrollMode.value,
-      isFollowing: isFollowing.value,
-    });
     requestAnimationFrame(() => {
       contentChangeScheduled = false;
       const m = scrollMode.value;
-      followDebug('scheduleAutoScroll:run', {
-        smooth,
-        mode: m,
-        isFollowing: isFollowing.value,
-      });
       if (m === 'force') {
         scrollToBottom(smooth);
       } else if (m === 'follow' && isFollowing.value) {
@@ -304,53 +254,32 @@ export function useAutoScroller(
     const hasUserIntent = hasRecentUserScrollIntent();
     lastObservedScrollTop = el.scrollTop;
     lastObservedScrollHeight = el.scrollHeight;
-    followDebug('onScroll', {
-      top: el.scrollTop,
-      delta,
-      scrollHeight: el.scrollHeight,
-      scrollHeightDelta,
-      clientHeight: el.clientHeight,
-      atBottom,
-      hasUserIntent,
-      isFollowingBefore: isFollowing.value,
-      lastSetScrollTop,
-    });
     if (atBottom) {
       isFollowing.value = true;
-      followDebug('onScroll:setFollowing', { isFollowing: true, reason: 'at-bottom' });
       return;
     }
     if (!isFollowing.value) {
-      followDebug('onScroll:setFollowing', { isFollowing: false, reason: 'already-unlocked' });
       return;
     }
     if (
       lastSetScrollTop >= 0 &&
       Math.abs(el.scrollTop - lastSetScrollTop) <= INTERVENTION_TOLERANCE_PX
     ) {
-      followDebug('onScroll:setFollowing', {
-        isFollowing: true,
-        reason: 'programmatic-near-target',
-      });
       return;
     }
     if (delta < -INTERVENTION_TOLERANCE_PX && scrollHeightDelta <= 0 && hasUserIntent) {
       isFollowing.value = false;
-      followDebug('onScroll:setFollowing', { isFollowing: false, reason: 'scroll-up' });
       return;
     }
-    followDebug('onScroll:setFollowing', { isFollowing: true, reason: 'keep-locked' });
   }
 
   function resumeFollow(smooth = true) {
     isFollowing.value = true;
-    followDebug('resumeFollow', { smooth });
     scrollToBottom(smooth);
   }
 
   function enableFollow() {
     isFollowing.value = true;
-    followDebug('enableFollow');
   }
 
   function resetFollow() {
@@ -365,16 +294,13 @@ export function useAutoScroller(
       lastObservedScrollTop = el.scrollTop;
       lastObservedScrollHeight = el.scrollHeight;
     }
-    followDebug('resetFollow');
   }
 
   function notifyContentChange(smooth = true) {
-    followDebug('notifyContentChange', { smooth });
     scheduleAutoScroll(smooth);
   }
 
   function setup(el: HTMLElement) {
-    followDebug('setup', { top: el.scrollTop });
     lastObservedScrollTop = el.scrollTop;
     lastObservedScrollHeight = el.scrollHeight;
     el.addEventListener('scroll', onScroll, { passive: true });
@@ -431,7 +357,6 @@ export function useAutoScroller(
   }
 
   function teardown(el: HTMLElement) {
-    followDebug('teardown', { top: el.scrollTop });
     el.removeEventListener('scroll', onScroll);
     const clearPointerInteraction = (el as HTMLElement & { __clearPointerInteraction?: () => void })
       .__clearPointerInteraction;
