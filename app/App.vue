@@ -474,6 +474,7 @@ function handleOutputPanelInitialRenderComplete() {
   nextTick(() => {
     scrollOutputPanelToBottom(false);
     syncFloatingExtent();
+    inputPanelRef.value?.focus();
   });
 }
 
