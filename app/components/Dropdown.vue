@@ -28,6 +28,7 @@
       :class="props.popupClass"
       :style="[props.popupStyle, menuStyle]"
       role="listbox"
+      title=""
       tabindex="-1"
       @click.stop
       @keydown="onKeyDown"

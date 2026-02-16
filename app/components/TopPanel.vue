@@ -91,7 +91,7 @@
                         <button type="button" class="tree-action-button new-session" title="New session" @click.stop="handleCreateSessionIn(worktree.directory, sandbox.directory, close)">
                           <Icon icon="lucide:message-circle-plus" :width="16" :height="16" />
                         </button>
-                        <button type="button" class="tree-action-button fork" @click.stop="handleCreateWorktree(sandbox.directory, close)">
+                        <button type="button" class="tree-action-button fork" title="Create a new sandbox" @click.stop="handleCreateWorktree(sandbox.directory, close)">
                           <Icon icon="lucide:git-branch" :width="16" :height="16" />
                         </button>
                         <button
@@ -128,7 +128,7 @@
                           type="button"
                           class="tree-action-button session-del"
                           :class="isShiftPressed ? 'danger' : 'archive'"
-                          :title="isShiftPressed ? 'Delete session (Shift)' : 'Archive session'"
+                          :title="isShiftPressed ? 'Delete session permanently' : 'Archive session (with Shift key to delete permanently)'"
                           @click.stop="handleSessionAction(session.id, close)"
                         >
                           <Icon :icon="isShiftPressed ? 'lucide:trash-2' : 'lucide:archive'" :width="16" :height="16" />
