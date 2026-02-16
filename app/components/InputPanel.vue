@@ -761,7 +761,13 @@ function focus() {
   textareaRef.value?.focus();
 }
 
-defineExpose({ focus });
+function reset() {
+  historyOpen.value = false;
+  activeCommandIndex.value = 0;
+  modelSearchQuery.value = '';
+}
+
+defineExpose({ focus, reset });
 
 const inputMessageStyle = computed(() => {
   if (!props.agentColor) return { borderColor: '#334155' };
