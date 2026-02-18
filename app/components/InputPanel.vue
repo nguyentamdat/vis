@@ -19,6 +19,45 @@
               >
                 <div class="history-item-text">{{ entry.text }}</div>
               </div>
+              <button
+                type="button"
+                class="history-action-button"
+                :class="{ 'is-favorited': isFavorite(entry.text) }"
+                title="Add to favorites"
+                @click.stop="addFavorite(entry)"
+              >
+                <Icon icon="lucide:star" :width="14" :height="14" />
+              </button>
+            </DropdownItem>
+          </div>
+        </template>
+      </Dropdown>
+      <Dropdown
+        ref="favoritesDropdownRef"
+        v-model:open="favoritesOpen"
+        auto-close
+        popup-class="history-popup"
+        @select="handleFavoriteSelect"
+      >
+        <template #trigger><span /></template>
+        <template #default>
+          <div class="dropdown-list">
+            <DropdownItem v-for="(entry, i) in favorites" :key="i" :value="entry">
+              <div
+                class="history-item"
+                :style="{ borderLeftColor: entry.agentColor ? `${entry.agentColor}99` : '#334155' }"
+                :title="entry.text"
+              >
+                <div class="history-item-text">{{ entry.text }}</div>
+              </div>
+              <button
+                type="button"
+                class="history-action-button remove"
+                title="Remove from favorites"
+                @click.stop="confirmRemoveFavorite(i)"
+              >
+                <Icon icon="lucide:trash-2" :width="14" :height="14" />
+              </button>
             </DropdownItem>
           </div>
         </template>
@@ -258,6 +297,7 @@ import Dropdown from './Dropdown.vue';
 import DropdownItem from './Dropdown/Item.vue';
 import DropdownSearch from './Dropdown/Search.vue';
 import { useMessages } from '../composables/useMessages';
+import { useFavoriteMessages } from '../composables/useFavoriteMessages';
 import { useSettings } from '../composables/useSettings';
 type ModelOption = {
   id: string;
@@ -322,10 +362,18 @@ const { enterToSend, suppressAutoWindows } = useSettings();
 // --- Input history navigation ---
 const { roots: messageRoots, getTextContent } = useMessages();
 const historyOpen = ref(false);
+const favoritesOpen = ref(false);
 
-const historyDropdownRef = ref<InstanceType<typeof Dropdown> | null>(null);
+type DropdownRef = {
+  moveHighlight: (direction: 'up' | 'down') => void;
+};
+
+const historyDropdownRef = ref<DropdownRef | null>(null);
+const favoritesDropdownRef = ref<DropdownRef | null>(null);
 
 type HistoryEntry = { text: string; agent?: string; agentColor?: string };
+
+const { favorites, addFavorite, removeFavorite, isFavorite } = useFavoriteMessages();
 
 const userHistory = computed(() => {
   const result: HistoryEntry[] = [];
@@ -340,7 +388,7 @@ const userHistory = computed(() => {
   return result;
 });
 
-function handleHistorySelect(entry: HistoryEntry) {
+function applyHistoryEntry(entry: HistoryEntry) {
   messageValue.value = entry.text;
   if (entry.agent && props.agentOptions.some((a) => a.id === entry.agent)) {
     emit('update:selected-mode', entry.agent);
@@ -348,10 +396,47 @@ function handleHistorySelect(entry: HistoryEntry) {
   nextTick(() => textareaRef.value?.focus());
 }
 
+function toHistoryEntry(value: unknown): HistoryEntry | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.text !== 'string') return null;
+  const entry: HistoryEntry = { text: candidate.text };
+  if (typeof candidate.agent === 'string') entry.agent = candidate.agent;
+  if (typeof candidate.agentColor === 'string') entry.agentColor = candidate.agentColor;
+  return entry;
+}
+
+function handleHistorySelect(entry: unknown) {
+  const value = toHistoryEntry(entry);
+  if (!value) return;
+  applyHistoryEntry(value);
+}
+
+function handleFavoriteSelect(entry: unknown) {
+  const value = toHistoryEntry(entry);
+  if (!value) return;
+  applyHistoryEntry(value);
+}
+
+function confirmRemoveFavorite(index: number) {
+  if (!window.confirm('Remove this message from favorites?')) return;
+  removeFavorite(index);
+}
+
 watch(historyOpen, (open) => {
   if (open) {
+    favoritesOpen.value = false;
     // Highlight the last (most recent) item and scroll to it
     nextTick(() => historyDropdownRef.value?.moveHighlight('up'));
+  } else {
+    nextTick(() => textareaRef.value?.focus());
+  }
+});
+
+watch(favoritesOpen, (open) => {
+  if (open) {
+    historyOpen.value = false;
+    nextTick(() => favoritesDropdownRef.value?.moveHighlight('down'));
   } else {
     nextTick(() => textareaRef.value?.focus());
   }
@@ -550,6 +635,19 @@ function handleKeydown(event: KeyboardEvent) {
     historyOpen.value = true;
     return;
   }
+  if (
+    event.key === 'ArrowDown' &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    messageValue.value === '' &&
+    favorites.value.length > 0
+  ) {
+    event.preventDefault();
+    favoritesOpen.value = true;
+    return;
+  }
   if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey) {
     const direction: 'next' | 'prev' = event.shiftKey ? 'prev' : 'next';
     if (!cycleAgent(direction)) return;
@@ -737,6 +835,7 @@ function focus() {
 
 function reset() {
   historyOpen.value = false;
+  favoritesOpen.value = false;
   activeCommandIndex.value = 0;
   modelSearchQuery.value = '';
 }
@@ -1186,7 +1285,8 @@ const inputMessageStyle = computed(() => {
 .history-item {
   border-left: 3px solid #334155;
   padding-left: 8px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .history-item-text {
@@ -1199,6 +1299,37 @@ const inputMessageStyle = computed(() => {
   overflow: hidden;
   word-break: break-all;
   white-space: pre-wrap;
+}
+
+.history-action-button {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.history-action-button:hover {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.14);
+  border-color: rgba(251, 191, 36, 0.3);
+}
+
+.history-action-button.is-favorited {
+  color: #fbbf24;
+}
+
+.history-action-button.remove:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.3);
 }
 
 .input-button {

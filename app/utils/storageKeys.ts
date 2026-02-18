@@ -14,6 +14,9 @@ export const StorageKeys = {
     composer: 'drafts.composer.v1',
     question: 'drafts.question.v1',
   },
+  favorites: {
+    messages: 'favorites.messages.v1',
+  },
   auth: {
     credentials: 'auth.credentials.v1',
   },
