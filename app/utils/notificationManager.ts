@@ -1,59 +1,67 @@
-/**
- * Pure notification state manager — no Vue, no framework dependencies.
- *
- * Tracks pending notification request IDs grouped by root session ID.
- * Child session IDs are resolved to their root parent via the
- * `resolveRoot` callback supplied at creation time.
- */
+import { createSessionKey, normalizeSessionKey, type SessionKey } from './sessionKey';
 
-export function createNotificationManager(resolveRoot: (sessionId: string) => string) {
-  // rootSessionId → Set<requestId>
-  let state: Map<string, Set<string>> = new Map();
-  // Insertion-ordered list of root session IDs (for badge ordering)
+type NotificationEntry = {
+  projectId: string;
+  sessionId: string;
+  requestIds: Set<string>;
+};
+
+export type NotificationSnapshotEntry = {
+  projectId: string;
+  sessionId: string;
+  requestIds: string[];
+};
+
+export function createNotificationManager(
+  resolveRoot: (projectId: string, sessionId: string) => SessionKey,
+) {
+  let state = new Map<string, NotificationEntry>();
   let sessionOrder: string[] = [];
 
-  /**
-   * Add a notification for the given session + request.
-   * The sessionId is resolved to its root parent before storage.
-   * Returns `true` if the state actually changed (new requestId added).
-   */
-  function addNotification(sessionId: string, requestId: string): boolean {
-    if (!sessionId || !requestId) return false;
-    const rootId = resolveRoot(sessionId);
-    const existing = state.get(rootId);
-    if (existing?.has(requestId)) return false;
+  function addNotification(projectId: string, sessionId: string, requestId: string): boolean {
+    const normalized = normalizeSessionKey(projectId, sessionId);
+    if (!normalized || !requestId) return false;
+    const resolvedRoot = resolveRoot(normalized.projectId, normalized.sessionId);
+    const key = createSessionKey(resolvedRoot.projectId, resolvedRoot.sessionId);
+    if (!key) return false;
+
+    const existing = state.get(key);
+    if (existing?.requestIds.has(requestId)) return false;
 
     const next = new Map(state);
-    const requestSet = new Set(existing ?? []);
-    requestSet.add(requestId);
-    next.set(rootId, requestSet);
+    const entry: NotificationEntry = {
+      projectId: resolvedRoot.projectId,
+      sessionId: resolvedRoot.sessionId,
+      requestIds: new Set(existing?.requestIds ?? []),
+    };
+    entry.requestIds.add(requestId);
+    next.set(key, entry);
     state = next;
 
-    if (!sessionOrder.includes(rootId)) {
-      sessionOrder = [...sessionOrder, rootId];
+    if (!sessionOrder.includes(key)) {
+      sessionOrder = [...sessionOrder, key];
     }
     return true;
   }
 
-  /**
-   * Remove a notification request across all sessions.
-   * If a session's set becomes empty, the session entry is removed.
-   * Returns `true` if the state actually changed.
-   */
   function removeNotification(requestId: string): boolean {
     if (!requestId) return false;
-    for (const [rootId, requestSet] of state.entries()) {
-      if (!requestSet.has(requestId)) continue;
+    for (const [key, entry] of state.entries()) {
+      if (!entry.requestIds.has(requestId)) continue;
 
       const next = new Map(state);
-      const updatedSet = new Set(requestSet);
+      const updatedSet = new Set(entry.requestIds);
       updatedSet.delete(requestId);
 
       if (updatedSet.size === 0) {
-        next.delete(rootId);
-        sessionOrder = sessionOrder.filter((id) => id !== rootId);
+        next.delete(key);
+        sessionOrder = sessionOrder.filter((id) => id !== key);
       } else {
-        next.set(rootId, updatedSet);
+        next.set(key, {
+          projectId: entry.projectId,
+          sessionId: entry.sessionId,
+          requestIds: updatedSet,
+        });
       }
       state = next;
       return true;
@@ -61,56 +69,53 @@ export function createNotificationManager(resolveRoot: (sessionId: string) => st
     return false;
   }
 
-  /**
-   * Clear all notifications for a session (resolved to root).
-   * Returns `true` if the state actually changed.
-   */
-  function clearSession(sessionId: string): boolean {
-    if (!sessionId) return false;
-    const rootId = resolveRoot(sessionId);
-    if (!state.has(rootId)) return false;
+  function clearSession(projectId: string, sessionId: string): boolean {
+    const normalized = normalizeSessionKey(projectId, sessionId);
+    if (!normalized) return false;
+    const root = resolveRoot(normalized.projectId, normalized.sessionId);
+    const key = createSessionKey(root.projectId, root.sessionId);
+    if (!key || !state.has(key)) return false;
 
     const next = new Map(state);
-    next.delete(rootId);
+    next.delete(key);
     state = next;
-    sessionOrder = sessionOrder.filter((id) => id !== rootId);
+    sessionOrder = sessionOrder.filter((id) => id !== key);
     return true;
   }
 
-  /**
-   * Return a structured-cloneable snapshot of the current state.
-   * Safe for `postMessage` (no `Set` values).
-   */
-  function getState(): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    for (const [rootId, requestSet] of state.entries()) {
-      out[rootId] = [...requestSet];
+  function getState(): Record<string, NotificationSnapshotEntry> {
+    const out: Record<string, NotificationSnapshotEntry> = {};
+    for (const [key, entry] of state.entries()) {
+      out[key] = {
+        projectId: entry.projectId,
+        sessionId: entry.sessionId,
+        requestIds: [...entry.requestIds],
+      };
     }
     return out;
   }
 
-  /** Whether any notification is pending. */
   function hasAny(): boolean {
     return state.size > 0;
   }
 
-  /** Root session IDs in insertion order. */
-  function getSessionIds(): string[] {
+  function getSessionKeys(): string[] {
     return sessionOrder.filter((id) => state.has(id));
   }
 
-  /**
-   * Bulk-import state (e.g. from a bootstrap / postMessage payload).
-   * Replaces the current state entirely.
-   */
-  function importState(data: Record<string, string[]>): void {
-    const next = new Map<string, Set<string>>();
+  function importState(data: Record<string, NotificationSnapshotEntry>): void {
+    const next = new Map<string, NotificationEntry>();
     const order: string[] = [];
-    for (const [rootId, requestIds] of Object.entries(data)) {
-      if (requestIds.length > 0) {
-        next.set(rootId, new Set(requestIds));
-        order.push(rootId);
-      }
+    for (const [key, entry] of Object.entries(data)) {
+      const normalized = normalizeSessionKey(entry.projectId, entry.sessionId);
+      if (!normalized || !Array.isArray(entry.requestIds) || entry.requestIds.length === 0)
+        continue;
+      next.set(key, {
+        projectId: normalized.projectId,
+        sessionId: normalized.sessionId,
+        requestIds: new Set(entry.requestIds),
+      });
+      order.push(key);
     }
     state = next;
     sessionOrder = order;
@@ -122,7 +127,7 @@ export function createNotificationManager(resolveRoot: (sessionId: string) => st
     clearSession,
     getState,
     hasAny,
-    getSessionIds,
+    getSessionKeys,
     importState,
   };
 }

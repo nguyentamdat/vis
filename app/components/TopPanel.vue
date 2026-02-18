@@ -319,6 +319,7 @@ export type TopPanelWorktree = {
 };
 
 export type TopPanelNotificationSession = {
+  projectId: string;
   sessionId: string;
   count: number;
 };

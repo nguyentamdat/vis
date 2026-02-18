@@ -73,13 +73,13 @@ export type ServerState = {
   projects: Record<string, ProjectState>;
 };
 
-/**
- * Notification state.
- * Maps root session IDs to sets of pending request IDs.
- * Used to track which notifications are pending for each session.
- * Serializes as Record<string, string[]> over postMessage.
- */
-export type NotificationState = Record<string, Set<string>>;
+export type WorkerNotificationEntry = {
+  projectId: string;
+  sessionId: string;
+  requestIds: string[];
+};
+
+export type NotificationState = Record<string, WorkerNotificationEntry>;
 
 /**
  * Selection key for identifying a specific session.

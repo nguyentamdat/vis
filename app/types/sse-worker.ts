@@ -1,5 +1,5 @@
 import type { ProjectInfo, SsePacket } from './sse';
-import type { ProjectState } from './worker-state';
+import type { ProjectState, WorkerNotificationEntry } from './worker-state';
 
 export type TabToWorkerMessage =
   | {
@@ -60,7 +60,7 @@ export type WorkerToTabMessage =
   | {
       type: 'state.bootstrap';
       projects: Record<string, ProjectState>;
-      notifications: Record<string, string[]>;
+      notifications: Record<string, WorkerNotificationEntry>;
     }
   | {
       type: 'state.project-updated';
@@ -73,10 +73,11 @@ export type WorkerToTabMessage =
     }
   | {
       type: 'state.notifications-updated';
-      notifications: Record<string, string[]>;
+      notifications: Record<string, WorkerNotificationEntry>;
     }
   | {
       type: 'notification.show';
+      projectId: string;
       sessionId: string;
       kind: 'permission' | 'question' | 'idle';
     };

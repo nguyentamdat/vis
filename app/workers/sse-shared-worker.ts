@@ -3,6 +3,7 @@ import { createNotificationManager } from '../utils/notificationManager';
 import {
   getCurrentProject,
   getSessionStatusMap,
+  getVcsInfo,
   listProjects,
   listSessions,
   setAuthorization,
@@ -133,19 +134,32 @@ function emitNotificationsUpdated(state: ConnectionState) {
   });
 }
 
-function shouldSuppressIdleNotification(state: ConnectionState, sessionId: string) {
-  if (!sessionId) return false;
-  return state.activeSelection?.sessionId === sessionId;
+function shouldSuppressIdleNotification(
+  state: ConnectionState,
+  projectId: string,
+  rootSessionId: string,
+) {
+  if (!projectId || !rootSessionId) return false;
+  const activeSelection = state.activeSelection;
+  if (!activeSelection) return false;
+  if (activeSelection.projectId !== projectId) return false;
+  const activeRootSessionId = state.stateBuilder.resolveRootSessionIdForProject(
+    projectId,
+    activeSelection.sessionId,
+  );
+  return activeRootSessionId === rootSessionId;
 }
 
 function emitNotificationShow(
   state: ConnectionState,
+  projectId: string,
   sessionId: string,
   kind: 'permission' | 'question' | 'idle',
 ) {
-  if (!sessionId) return;
+  if (!projectId || !sessionId) return;
   broadcast(state, {
     type: 'notification.show',
+    projectId,
     sessionId,
     kind,
   });
@@ -231,6 +245,10 @@ function handleStatePacket(
     const deletedDirectory = normalizeDirectory(asString(info.directory) ?? '');
     const deletedProjectId = state.stateBuilder.resolveProjectIdForDirectory(deletedDirectory);
     projectId = state.stateBuilder.processSessionDeleted(sessionId, deletedProjectId);
+    if (deletedProjectId && sessionId) {
+      const cleared = state.notificationManager.clearSession(deletedProjectId, sessionId);
+      notificationsChanged = cleared || notificationsChanged;
+    }
   }
 
   if (packetType === 'session.status' && properties) {
@@ -239,17 +257,28 @@ function handleStatePacket(
     const statusProjectId = state.stateBuilder.resolveProjectIdForDirectory(packetDirectory);
     if (statusProjectId) {
       projectId = state.stateBuilder.processSessionStatus(sessionId, status, statusProjectId);
-    }
+      const rootSessionId = state.stateBuilder.resolveRootSessionIdForProject(
+        statusProjectId,
+        sessionId,
+      );
+      if (rootSessionId) {
+        const idleRequestId = `idle:${statusProjectId}:${rootSessionId}`;
+        const treeIdle = state.stateBuilder.isSessionTreeIdle(statusProjectId, rootSessionId);
 
-    const idleRequestId = `idle:${sessionId}`;
-    if (status === 'busy') {
-      notificationsChanged =
-        state.notificationManager.removeNotification(idleRequestId) || notificationsChanged;
-    } else if (status === 'idle' && !shouldSuppressIdleNotification(state, sessionId)) {
-      const added = state.notificationManager.addNotification(sessionId, idleRequestId);
-      notificationsChanged = added || notificationsChanged;
-      if (added) {
-        emitNotificationShow(state, sessionId, 'idle');
+        if (!treeIdle) {
+          notificationsChanged =
+            state.notificationManager.removeNotification(idleRequestId) || notificationsChanged;
+        } else if (!shouldSuppressIdleNotification(state, statusProjectId, rootSessionId)) {
+          const added = state.notificationManager.addNotification(
+            statusProjectId,
+            rootSessionId,
+            idleRequestId,
+          );
+          notificationsChanged = added || notificationsChanged;
+          if (added) {
+            emitNotificationShow(state, statusProjectId, rootSessionId, 'idle');
+          }
+        }
       }
     }
   }
@@ -268,14 +297,22 @@ function handleStatePacket(
 
   if ((packetType === 'permission.asked' || packetType === 'question.asked') && info) {
     const request = getRequestInfo(info);
-    const added = state.notificationManager.addNotification(request.sessionId, request.requestId);
-    notificationsChanged = added || notificationsChanged;
-    if (added) {
-      emitNotificationShow(
-        state,
+    const requestProjectId = state.stateBuilder.resolveProjectIdForDirectory(packetDirectory);
+    if (requestProjectId && request.sessionId && request.requestId) {
+      const added = state.notificationManager.addNotification(
+        requestProjectId,
         request.sessionId,
-        packetType === 'permission.asked' ? 'permission' : 'question',
+        request.requestId,
       );
+      notificationsChanged = added || notificationsChanged;
+      if (added) {
+        emitNotificationShow(
+          state,
+          requestProjectId,
+          request.sessionId,
+          packetType === 'permission.asked' ? 'permission' : 'question',
+        );
+      }
     }
   }
 
@@ -380,6 +417,18 @@ async function bootstrapState(state: ConnectionState): Promise<void> {
       }),
     );
 
+    const allDirectories = new Set([...worktreeSet, ...sandboxSet]);
+    await Promise.all(
+      Array.from(allDirectories).map(async (directory) => {
+        const raw = await getVcsInfo(directory).catch(() => null);
+        const vcsInfo = asRecord(raw);
+        if (!vcsInfo) return;
+        const branch = asString(vcsInfo.branch);
+        if (!branch) return;
+        builder.applyVcsInfo(directory, { branch });
+      }),
+    );
+
     builder.getDefaultProjectId();
     state.stateBuilder = builder;
 
@@ -428,9 +477,10 @@ function createConnectionState(baseUrl: string, authorization?: string) {
     ports: new Set<MessagePort>(),
     connected: false,
     stateBuilder: createStateBuilder(),
-    notificationManager: createNotificationManager((sessionId) =>
-      state.stateBuilder.resolveRootSessionId(sessionId),
-    ),
+    notificationManager: createNotificationManager((projectId, sessionId) => ({
+      projectId,
+      sessionId: state.stateBuilder.resolveRootSessionIdForProject(projectId, sessionId),
+    })),
     activeSelection: null,
     client: createSseConnection({
       onPacket(packet) {
@@ -539,7 +589,9 @@ function handleMessage(port: MessagePort, event: MessageEvent<TabToWorkerMessage
       sessionId,
     };
 
-    const cleared = state.notificationManager.removeNotification(`idle:${sessionId}`);
+    const rootSessionId = state.stateBuilder.resolveRootSessionIdForProject(projectId, sessionId);
+    const idleRequestId = `idle:${projectId}:${rootSessionId || sessionId}`;
+    const cleared = state.notificationManager.removeNotification(idleRequestId);
     if (cleared) {
       emitNotificationsUpdated(state);
     }

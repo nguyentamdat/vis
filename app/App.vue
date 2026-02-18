@@ -299,6 +299,7 @@ import {
 import * as opencodeApi from './utils/opencode';
 import { opencodeTheme, resolveTheme, resolveAgentColor } from './utils/theme';
 import { splitFileContentDirectoryAndPath } from './utils/path';
+import { createSessionKey, parseSessionKey } from './utils/sessionKey';
 import { useCredentials } from './composables/useCredentials';
 import { useSettings } from './composables/useSettings';
 import {
@@ -1073,11 +1074,16 @@ const todoPanelCount = computed(() =>
 
 const notificationSessions = computed<TopPanelNotificationSession[]>(() =>
   notificationSessionOrder.value
-    .filter((sessionId) => Array.isArray(serverState.notifications[sessionId]))
-    .map((sessionId) => ({
-      sessionId,
-      count: serverState.notifications[sessionId]?.length ?? 0,
-    }))
+    .map((key) => {
+      const entry = serverState.notifications[key];
+      if (!entry) return null;
+      return {
+        projectId: entry.projectId,
+        sessionId: entry.sessionId,
+        count: entry.requestIds.length,
+      };
+    })
+    .filter((item): item is TopPanelNotificationSession => Boolean(item))
     .filter((item) => item.count > 0),
 );
 
@@ -1085,8 +1091,8 @@ watch(
   () => serverState.notifications,
   (notifications) => {
     const keys = Object.keys(notifications);
-    const keep = notificationSessionOrder.value.filter((sessionId) => keys.includes(sessionId));
-    const next = keys.filter((sessionId) => !keep.includes(sessionId));
+    const keep = notificationSessionOrder.value.filter((key) => keys.includes(key));
+    const next = keys.filter((key) => !keep.includes(key));
     notificationSessionOrder.value = [...keep, ...next];
   },
   { immediate: true, deep: true },
@@ -2312,39 +2318,25 @@ function handleTopPanelSessionSelect(payload: {
   void switchSessionSelection(projectId, payload.sessionId);
 }
 
-function selectSessionById(sessionId: string) {
-  let targetSessionId = sessionId;
-  const parentMap = sessionParentById.value;
-  while (parentMap.get(targetSessionId)) {
-    targetSessionId = parentMap.get(targetSessionId) ?? targetSessionId;
-  }
-  const worktreeEntry = topPanelTreeData.value.find((worktree) =>
-    worktree.sandboxes.some((sandbox) =>
-      sandbox.sessions.some((session) => session.id === targetSessionId),
-    ),
-  );
-  if (!worktreeEntry) return;
-  const sandboxEntry = worktreeEntry.sandboxes.find((sandbox) =>
-    sandbox.sessions.some((session) => session.id === targetSessionId),
-  );
-  if (!sandboxEntry) return;
-  handleTopPanelSessionSelect({
-    projectId: worktreeEntry.projectId,
-    worktree: worktreeEntry.directory,
-    directory: sandboxEntry.directory,
-    sessionId: targetSessionId,
-  });
+function selectSessionByKey(projectId: string, sessionId: string) {
+  const normalizedProjectId = projectId.trim();
+  const normalizedSessionId = sessionId.trim();
+  if (!normalizedProjectId || !normalizedSessionId) return;
+  void switchSessionSelection(normalizedProjectId, normalizedSessionId);
 }
 
 function handleNotificationSessionSelect() {
-  const queue = notificationSessionOrder.value.filter(
-    (sessionId) => (serverState.notifications[sessionId]?.length ?? 0) > 0,
-  );
+  const queue = notificationSessionOrder.value.filter((key) => {
+    const entry = serverState.notifications[key];
+    return Boolean(entry && entry.requestIds.length > 0);
+  });
   if (queue.length === 0) return;
-  const nextSessionId =
-    queue.find((sessionId) => sessionId !== selectedSessionId.value) ?? queue[0];
-  if (!nextSessionId) return;
-  selectSessionById(nextSessionId);
+  const selectedKey = createSessionKey(selectedProjectId.value, selectedSessionId.value);
+  const nextKey = queue.find((key) => key !== selectedKey) ?? queue[0];
+  if (!nextKey) return;
+  const entry = serverState.notifications[nextKey];
+  if (!entry) return;
+  selectSessionByKey(entry.projectId, entry.sessionId);
 }
 
 async function deleteSession(sessionId: string) {
@@ -2357,7 +2349,7 @@ async function deleteSession(sessionId: string) {
     if (selectedSessionId.value === sessionId) {
       selectedKey.value = { projectId: selectedProjectId.value, sessionId: '' };
     }
-    clearNotificationSession(sessionId);
+    clearNotificationSession(selectedProjectId.value, sessionId);
     serverState.notifySessionRemoved(sessionId, selectedProjectId.value || undefined);
     if (!selectedSessionId.value && pickPreferredSessionId(filteredSessions.value) === '') {
       await createNewSession();
@@ -2693,9 +2685,10 @@ async function fetchPendingQuestions(directory?: string) {
   }
 }
 
-function clearNotificationSession(sessionId: string) {
-  if (!sessionId) return;
-  notificationSessionOrder.value = notificationSessionOrder.value.filter((id) => id !== sessionId);
+function clearNotificationSession(projectId: string, sessionId: string) {
+  const key = createSessionKey(projectId, sessionId);
+  if (!key) return;
+  notificationSessionOrder.value = notificationSessionOrder.value.filter((id) => id !== key);
 }
 
 function ensureBrowserNotificationPermission() {
@@ -2706,12 +2699,18 @@ function ensureBrowserNotificationPermission() {
   void Notification.requestPermission();
 }
 
-function showBrowserNotification(sessionId: string, type: 'permission' | 'question' | 'idle') {
+function showBrowserNotification(
+  projectId: string,
+  sessionId: string,
+  type: 'permission' | 'question' | 'idle',
+) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (typeof Notification === 'undefined') return;
   if (!document.hidden) return;
   if (Notification.permission !== 'granted') return;
-  const session = sessions.value.find((entry) => entry.id === sessionId);
+  const session = sessions.value.find(
+    (entry) => entry.id === sessionId && resolveProjectIdForSession(entry.id) === projectId,
+  );
   const kind =
     type === 'permission' ? 'Permission' : type === 'question' ? 'Question' : 'Session idle';
   const body =
@@ -2724,11 +2723,11 @@ function showBrowserNotification(sessionId: string, type: 'permission' | 'questi
         : `Session ${sessionId} requires your response.`;
   const notification = new Notification(`${kind}`, {
     body,
-    tag: `vis-${type}-${sessionId}`,
+    tag: `vis-${type}-${projectId}-${sessionId}`,
   });
   notification.onclick = () => {
     window.focus();
-    selectSessionById(sessionId);
+    selectSessionByKey(projectId, sessionId);
     notification.close();
   };
 }
@@ -3585,7 +3584,10 @@ function formatNotificationDump(): string {
   if (Object.keys(map).length === 0) {
     lines.push('  (empty)');
   }
-  for (const [sessionId, requestIds] of Object.entries(map)) {
+  for (const [key, entry] of Object.entries(map)) {
+    const parsed = parseSessionKey(key);
+    const projectId = parsed?.projectId ?? entry.projectId;
+    const sessionId = parsed?.sessionId ?? entry.sessionId;
     const session = sessions.value.find((s) => s.id === sessionId);
     const label = session ? sessionLabel(session) : '(unknown session)';
     const parentId = parentMap.get(sessionId);
@@ -3597,8 +3599,8 @@ function formatNotificationDump(): string {
     if (isAllowed) flags.push('ALLOWED');
     if (parentId) flags.push('CHILD');
     const flagStr = flags.length > 0 ? `  [${flags.join(', ')}]` : '';
-    lines.push(`  ${sessionId}  "${label}"${parentInfo}${flagStr}`);
-    for (const requestId of requestIds) {
+    lines.push(`  ${projectId}:${sessionId}  "${label}"${parentInfo}${flagStr}`);
+    for (const requestId of entry.requestIds) {
       const isIdle = requestId.startsWith('idle:');
       const type = isIdle ? 'idle' : 'permission/question';
       lines.push(`    - ${requestId}  (${type})`);
@@ -4141,7 +4143,7 @@ const ge = useGlobalEvents(credentials);
 ge.setWorkerMessageHandler(serverState.handleStateMessage);
 serverState.setWorkerSender(ge.sendToWorker);
 serverState.setNotificationShowHandler((message) => {
-  showBrowserNotification(message.sessionId, message.kind);
+  showBrowserNotification(message.projectId, message.sessionId, message.kind);
 });
 const deltaAccumulator = useDeltaAccumulator();
 deltaAccumulator.listen(ge);
@@ -6404,7 +6406,8 @@ onMounted(() => {
   globalEventUnsubscribers.push(
     ge.on('session.deleted', ({ info }) => {
       const sessionInfo = info as SessionInfo;
-      clearNotificationSession(sessionInfo.id);
+      const projectId = resolveProjectIdForDirectory(sessionInfo.directory);
+      clearNotificationSession(projectId, sessionInfo.id);
       if (selectedSessionId.value === sessionInfo.id) {
         selectedKey.value = { projectId: selectedProjectId.value, sessionId: '' };
       }

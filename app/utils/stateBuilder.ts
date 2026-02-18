@@ -750,6 +750,48 @@ export function createStateBuilder() {
     return resolveRootSessionIdInProject(sessionId, resolved.projectId);
   }
 
+  function resolveRootSessionIdForProject(projectId: string, sessionId: string): string {
+    const normalizedProjectId = projectId.trim();
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedProjectId || !normalizedSessionId) return normalizedSessionId;
+    return resolveRootSessionIdInProject(normalizedSessionId, normalizedProjectId);
+  }
+
+  function isSessionTreeIdle(projectId: string, sessionId: string): boolean {
+    const normalizedProjectId = projectId.trim();
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedProjectId || !normalizedSessionId) return false;
+
+    const rootSessionId = resolveRootSessionIdInProject(normalizedSessionId, normalizedProjectId);
+    if (!rootSessionId) return false;
+
+    const project = state.projects[normalizedProjectId];
+    if (!project) return false;
+
+    const queue = [rootSessionId];
+    const visited = new Set<string>();
+
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      if (!currentId || visited.has(currentId)) continue;
+      visited.add(currentId);
+
+      const entry = findSessionEntry(currentId, normalizedProjectId);
+      if (!entry) return false;
+      if (entry.session.status !== 'idle') return false;
+
+      Object.values(project.sandboxes).forEach((sandbox) => {
+        Object.values(sandbox.sessions).forEach((session) => {
+          if (session.parentID !== currentId) return;
+          if (visited.has(session.id)) return;
+          queue.push(session.id);
+        });
+      });
+    }
+
+    return true;
+  }
+
   return {
     applyProjects,
     applySessions,
@@ -771,5 +813,7 @@ export function createStateBuilder() {
     getDefaultProjectId,
     findSessionProject,
     resolveRootSessionId,
+    resolveRootSessionIdForProject,
+    isSessionTreeIdle,
   };
 }

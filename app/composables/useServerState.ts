@@ -1,6 +1,6 @@
 import { reactive, ref } from 'vue';
 import type { TabToWorkerMessage, WorkerToTabMessage } from '../types/sse-worker';
-import type { ProjectState, SelectionKey } from '../types/worker-state';
+import type { ProjectState, SelectionKey, WorkerNotificationEntry } from '../types/worker-state';
 
 type SessionMutatedInfo = Extract<TabToWorkerMessage, { type: 'session.mutated' }>['info'];
 type SessionRemovedInfo = Extract<TabToWorkerMessage, { type: 'session.removed' }>;
@@ -10,7 +10,7 @@ type SendToWorker = (message: TabToWorkerMessage) => boolean;
 
 export function useServerState(initialSender?: SendToWorker) {
   const projects = reactive<Record<string, ProjectState>>({});
-  const notifications = reactive<Record<string, string[]>>({});
+  const notifications = reactive<Record<string, WorkerNotificationEntry>>({});
   const bootstrapped = ref(false);
 
   let sendToWorker: SendToWorker | undefined = initialSender;
@@ -23,7 +23,7 @@ export function useServerState(initialSender?: SendToWorker) {
     Object.assign(projects, next);
   }
 
-  function replaceNotifications(next: Record<string, string[]>) {
+  function replaceNotifications(next: Record<string, WorkerNotificationEntry>) {
     Object.keys(notifications).forEach((key) => {
       delete notifications[key];
     });
