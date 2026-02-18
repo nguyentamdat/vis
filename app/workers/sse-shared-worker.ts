@@ -473,6 +473,13 @@ function attachPort(port: MessagePort, baseUrl: string, authorization?: string) 
 
   if (state.connected) {
     send(port, { type: 'connection.open' });
+    if (!state.bootstrapPromise) {
+      send(port, {
+        type: 'state.bootstrap',
+        projects: state.stateBuilder.getState().projects,
+        notifications: state.notificationManager.getState(),
+      });
+    }
   }
 }
 
