@@ -74,12 +74,27 @@ let cachedTheme = '';
 let loadedLanguageCache = new Set<string>(['text']);
 let failedLanguageCache = new Set<string>();
 
+const HIGHLIGHT_CACHE_MAX = 512;
+let codeHtmlCache = new Map<string, string>();
+let mdHighlightCache = new Map<string, string>();
+
+function pruneHighlightCache(cache: Map<string, string>) {
+  if (cache.size <= HIGHLIGHT_CACHE_MAX) return;
+  const target = Math.floor(HIGHLIGHT_CACHE_MAX / 2);
+  for (const key of cache.keys()) {
+    if (cache.size <= target) break;
+    cache.delete(key);
+  }
+}
+
 function getHighlighter(theme: string) {
   if (!highlighterPromise || cachedTheme !== theme) {
     cachedTheme = theme;
     highlighterPromise = createHighlighter({ themes: [theme], langs: ['text'] });
     loadedLanguageCache = new Set(['text']);
     failedLanguageCache = new Set();
+    codeHtmlCache = new Map();
+    mdHighlightCache = new Map();
   }
   return highlighterPromise;
 }
@@ -143,11 +158,18 @@ function safeCodeToHtml(
   lang: string,
   theme: string,
 ): string {
+  const cacheKey = `${lang}\0${code}`;
+  const cached = codeHtmlCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  let result: string;
   try {
-    return highlighter.codeToHtml(code, { lang, theme });
+    result = highlighter.codeToHtml(code, { lang, theme });
   } catch {
-    return highlighter.codeToHtml(code, { lang: 'text', theme });
+    result = highlighter.codeToHtml(code, { lang: 'text', theme });
   }
+  codeHtmlCache.set(cacheKey, result);
+  pruneHighlightCache(codeHtmlCache);
+  return result;
 }
 
 function escapeHtml(value: string) {
@@ -890,11 +912,18 @@ function getMarkdownIt(highlighter: Highlighter, theme: string) {
 
     const shikiHighlight = cachedMd.options.highlight;
     cachedMd.options.highlight = function (code, lang, attrs) {
+      const cacheKey = `${lang}\0${code}`;
+      const cached = mdHighlightCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+      let result: string;
       try {
-        return shikiHighlight?.call(this, code, lang, attrs) ?? '';
+        result = shikiHighlight?.call(this, code, lang, attrs) ?? '';
       } catch {
-        return safeCodeToHtml(highlighter, code, lang || 'text', theme);
+        result = safeCodeToHtml(highlighter, code, lang || 'text', theme);
       }
+      mdHighlightCache.set(cacheKey, result);
+      pruneHighlightCache(mdHighlightCache);
+      return result;
     };
   }
   if (!cachedMd || !cachedMdShikiOptions) {
