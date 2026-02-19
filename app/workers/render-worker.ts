@@ -34,6 +34,41 @@ type MarkdownRenderEnv = {
   fileSet?: Set<string>;
 };
 
+type ParsedInlineFileRef = {
+  path: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+};
+
+function parsePositiveInt(raw?: string) {
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) return undefined;
+  return value;
+}
+
+function parseInlineFileRef(rawRef: string, fileSet: Set<string>): ParsedInlineFileRef | null {
+  const ref = rawRef.trim();
+  if (!ref) return null;
+  if (fileSet.has(ref)) return { path: ref };
+
+  const match = /^(.+?):(\d+)(?:(?::(\d+))|(?:-(\d+)))?$/.exec(ref);
+  if (!match) return null;
+
+  const path = (match[1] ?? '').trim();
+  if (!path || !fileSet.has(path)) return null;
+
+  const line = parsePositiveInt(match[2]);
+  if (!line) return null;
+
+  const column = parsePositiveInt(match[3]);
+  const endLineRaw = parsePositiveInt(match[4]);
+  const endLine = endLineRaw && endLineRaw >= line ? endLineRaw : undefined;
+
+  return { path, line, column, endLine };
+}
+
 let highlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighter>>> | null = null;
 let cachedTheme = '';
 let loadedLanguageCache = new Set<string>(['text']);
@@ -842,8 +877,12 @@ function getMarkdownIt(highlighter: Highlighter, theme: string) {
       const fileSet = (env as MarkdownRenderEnv | undefined)?.fileSet;
       const token = tokens[idx];
       const ref = token.content?.trim() ?? '';
-      if (fileSet && ref && fileSet.has(ref)) {
-        token.attrSet('data-file-ref', ref);
+      const parsed = fileSet && ref ? parseInlineFileRef(ref, fileSet) : null;
+      if (parsed) {
+        token.attrSet('data-file-ref', parsed.path);
+        if (parsed.line) token.attrSet('data-file-line', String(parsed.line));
+        if (parsed.column) token.attrSet('data-file-col', String(parsed.column));
+        if (parsed.endLine) token.attrSet('data-file-end-line', String(parsed.endLine));
         token.attrJoin('class', 'file-ref');
       }
       return defaultCodeInline(tokens, idx, options, env, self);
