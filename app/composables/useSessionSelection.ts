@@ -12,11 +12,25 @@ function getProjectSessionIds(project: ProjectState): string[] {
   return Array.from(new Set(ids));
 }
 
-function firstProjectId(projects: Record<string, ProjectState>) {
-  const ids = Object.keys(projects);
-  if (ids.length === 0) return '';
-  if (projects.global) return 'global';
-  return ids[0] ?? '';
+function findMostRecentSession(
+  projects: Record<string, ProjectState>,
+): { projectId: string; sessionId: string } | null {
+  let best: { projectId: string; sessionId: string; time: number } | null = null;
+
+  for (const [projectId, project] of Object.entries(projects)) {
+    for (const sandbox of Object.values(project.sandboxes)) {
+      for (const session of Object.values(sandbox.sessions)) {
+        if (session.parentID) continue;
+        if (session.timeArchived) continue;
+        const time = session.timeUpdated ?? session.timeCreated ?? 0;
+        if (!best || time > best.time) {
+          best = { projectId, sessionId: session.id, time };
+        }
+      }
+    }
+  }
+
+  return best;
 }
 
 export function useSessionSelection(
@@ -53,9 +67,20 @@ export function useSessionSelection(
     const map = projectMap.value;
     const currentKey = parseSessionKey(selectedKey.value);
     let projectId = projectIdHint?.trim() || currentKey?.projectId || '';
+
     if (!projectId || !map[projectId]) {
-      projectId = firstProjectId(map);
+      const recent = findMostRecentSession(map);
+      if (recent) {
+        const key = createSessionKey(recent.projectId, recent.sessionId);
+        if (!key) {
+          throw new Error('Failed to build session key from most recent session.');
+        }
+        selectedKey.value = key;
+        return key;
+      }
+      projectId = Object.keys(map)[0] ?? 'global';
     }
+
     if (!projectId) {
       throw new Error('No available project for selection.');
     }
