@@ -1,6 +1,8 @@
-import { ref, watch } from 'vue';
+import { onScopeDispose, ref, watch } from 'vue';
 import type { Ref } from 'vue';
 import type { MessageInfo } from '../types/sse';
+
+const SAFETY_TIMEOUT_MS = 5_000;
 
 type UseInitialRenderTrackingOptions = {
   visibleRoots: Ref<MessageInfo[]>;
@@ -15,6 +17,7 @@ export function useInitialRenderTracking(options: UseInitialRenderTrackingOption
   const pendingInitialRenderKeys = ref(new Set<string>());
   const initialRenderTrackingActive = ref(false);
   const renderedKeys = ref(new Set<string>());
+  let safetyTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
   function collectInitialRenderKeys(): Set<string> {
     const keys = new Set<string>();
@@ -25,28 +28,53 @@ export function useInitialRenderTracking(options: UseInitialRenderTrackingOption
     return keys;
   }
 
+  function clearSafetyTimeout() {
+    if (safetyTimeoutId !== undefined) {
+      clearTimeout(safetyTimeoutId);
+      safetyTimeoutId = undefined;
+    }
+  }
+
+  function completeTracking() {
+    clearSafetyTimeout();
+    pendingInitialRenderKeys.value = new Set<string>();
+    initialRenderTrackingActive.value = false;
+    options.onInitialRenderComplete();
+  }
+
+  function tryResolve(): boolean {
+    const expected = collectInitialRenderKeys();
+    for (const k of renderedKeys.value) expected.delete(k);
+    pendingInitialRenderKeys.value = expected;
+    if (expected.size === 0) {
+      completeTracking();
+      return true;
+    }
+    return false;
+  }
+
   function beginInitialRenderTracking() {
-    const keys = collectInitialRenderKeys();
-    pendingInitialRenderKeys.value = keys;
-    initialRenderTrackingActive.value = keys.size > 0;
-    if (keys.size === 0) options.onInitialRenderComplete();
+    if (tryResolve()) return;
+    initialRenderTrackingActive.value = true;
+    clearSafetyTimeout();
+    safetyTimeoutId = setTimeout(() => {
+      safetyTimeoutId = undefined;
+      if (initialRenderTrackingActive.value) completeTracking();
+    }, SAFETY_TIMEOUT_MS);
   }
 
   function handleMessageRendered(renderKey: string) {
     renderedKeys.value.add(renderKey);
     options.onMessageRendered();
     if (!initialRenderTrackingActive.value) return;
-    const keys = pendingInitialRenderKeys.value;
-    keys.delete(renderKey);
-    if (keys.size > 0) return;
-    initialRenderTrackingActive.value = false;
-    options.onInitialRenderComplete();
+    tryResolve();
   }
 
   watch(
     () => options.visibleRoots.value.length,
     (length, previous) => {
       if (length === 0) {
+        clearSafetyTimeout();
         pendingInitialRenderKeys.value = new Set<string>();
         initialRenderTrackingActive.value = false;
         renderedKeys.value = new Set<string>();
@@ -55,6 +83,8 @@ export function useInitialRenderTracking(options: UseInitialRenderTrackingOption
       if (previous === 0) beginInitialRenderTracking();
     },
   );
+
+  onScopeDispose(clearSafetyTimeout);
 
   return {
     initialRenderTrackingActive,
