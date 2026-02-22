@@ -3899,6 +3899,20 @@ function handleGlobalKeydown(event: KeyboardEvent) {
     return;
   }
 
+  // Alt-N: new session
+  if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'n') {
+    event.preventDefault();
+    createNewSession();
+    return;
+  }
+
+  // Alt-O: open shell
+  if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'o') {
+    event.preventDefault();
+    openShellFromInput('');
+    return;
+  }
+
   // Alt-Left/Right: switch session within the same project
   if (
     event.altKey &&
