@@ -2,6 +2,8 @@
 
 An alternative web UI for [OpenCode](https://github.com/sst/opencode), designed for daily use. It connects to a running OpenCode instance and provides a browser-based, window-style interface for managing sessions, viewing tool output, and interacting with AI agents in real time.
 
+![Demo](docs/demo.gif)
+
 ## Features
 
 - **Review-first floating windows** that keep tool output and agent reasoning in context
