@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { serveStatic } from '@hono/node-server/serve-static'
-import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
+import { serveStatic } from '@hono/node-server/serve-static';
+import { serve } from '@hono/node-server';
+import { Hono } from 'hono';
 import { join } from 'node:path';
 import { proxy } from 'hono/proxy';
 
@@ -10,7 +10,7 @@ const app = new Hono();
 if (process.argv[2] === 'proxy') {
   const baseURL = process.argv[3] ?? 'https://xenodrive.github.io/vis';
 
-  console.log("Proxy to " + baseURL);
+  console.log('Proxy to ' + baseURL);
 
   app.use('*', (c) => {
     const url = new URL(baseURL);
@@ -25,15 +25,18 @@ if (process.argv[2] === 'proxy') {
 
     return proxy(url, {
       ...c.req,
-    })
+    });
   });
 } else {
   app.use('*', serveStatic({ root: join(import.meta.dirname, 'dist/') }));
 }
 
-serve({
-  fetch: app.fetch,
-  port: process.env.VIS_PORT || 3000,
-}, (info) => {
-  console.log(`Listening on http://localhost:${info.port}`)
-});
+serve(
+  {
+    fetch: app.fetch,
+    port: process.env.VIS_PORT || 3000,
+  },
+  (info) => {
+    console.log(`Listening on http://localhost:${info.port}`);
+  },
+);

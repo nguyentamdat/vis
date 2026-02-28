@@ -15,6 +15,7 @@ An alternative web UI for [OpenCode](https://github.com/sst/opencode), designed 
 ## How to Use
 
 ### Cloud
+
 **No installation required** — just open the hosted version in your browser:
 
 **<https://xenodrive.github.io/vis/>**

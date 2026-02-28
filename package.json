@@ -7,15 +7,19 @@
     "webui"
   ],
   "homepage": "https://xenodrive.github.io/vis",
+  "license": "MIT",
+  "author": "Xenodrive, Inc.",
   "repository": {
     "url": "https://github.com/xenodrive/vis"
   },
-  "license": "MIT",
-  "author": "Xenodrive, Inc.",
-  "type": "module",
   "bin": {
     "vis": "server.js"
   },
+  "files": [
+    "server.js",
+    "dist"
+  ],
+  "type": "module",
   "scripts": {
     "prepack": "vite build",
     "format": "oxfmt",
@@ -51,9 +55,5 @@
     "vue": "^3.5.28",
     "vue-tsc": "^3.2.4"
   },
-  "files": [
-    "server.js",
-    "dist"
-  ],
   "packageManager": "pnpm@10.29.3"
 }
