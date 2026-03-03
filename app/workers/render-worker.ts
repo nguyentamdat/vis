@@ -838,6 +838,34 @@ async function resolveMarkdownLangAliases(highlighter: Highlighter, markdown: st
   return aliases;
 }
 
+/**
+ * Tiny markdown-it plugin that replaces task list markers ([ ] / [x]) with emoji.
+ */
+function taskListEmojiPlugin(md: MarkdownIt) {
+  md.core.ruler.after('inline', 'task-list-emoji', (state) => {
+    const tokens = state.tokens;
+    for (let i = 2; i < tokens.length; i++) {
+      const tok = tokens[i];
+      if (
+        tok.type !== 'inline' ||
+        tokens[i - 1].type !== 'paragraph_open' ||
+        tokens[i - 2].type !== 'list_item_open'
+      )
+        continue;
+
+      let emoji: string | null = null;
+      if (tok.content.startsWith('[ ] ')) emoji = '\u2B1C ';
+      else if (tok.content.startsWith('[x] ') || tok.content.startsWith('[X] ')) emoji = '\u2705 ';
+      if (!emoji) continue;
+
+      tok.content = emoji + tok.content.slice(4);
+      const first = tok.children?.[0];
+      if (first) first.content = emoji + first.content.slice(4);
+    }
+  });
+}
+
+
 function getMarkdownIt(highlighter: Highlighter, theme: string) {
   if (
     !cachedMd ||
@@ -858,6 +886,7 @@ function getMarkdownIt(highlighter: Highlighter, theme: string) {
     cachedMdShikiOptions = shikiOptions;
     cachedMd = new MarkdownIt({ html: false, linkify: false, breaks: true });
     cachedMd.use(fromHighlighter(highlighter, shikiOptions));
+    cachedMd.use(taskListEmojiPlugin);
     const defaultLinkOpen =
       cachedMd.renderer.rules.link_open ??
       function (tokens, idx, options, _env, self) {
