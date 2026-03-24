@@ -9,6 +9,7 @@ export const StorageKeys = {
     sidePanelCollapsed: 'state.sidePanelCollapsed.v1',
     sidePanelTab: 'state.sidePanelTab.v1',
     lastAuthError: 'state.lastAuthError.v1',
+    visibleProjects: 'state.visibleProjects.v1',
   },
   drafts: {
     composer: 'drafts.composer.v1',

@@ -73,6 +73,47 @@
                 </template>
               </DropdownSearch>
 
+              <div v-if="allProjects && allProjects.length > 1" class="project-picker-bar">
+                <button
+                  type="button"
+                  class="project-picker-toggle"
+                  :class="{ active: isProjectFilterActive }"
+                  @click.stop="projectPickerOpen = !projectPickerOpen"
+                >
+                  <Icon icon="lucide:filter" :width="12" :height="12" />
+                  <span>Projects</span>
+                  <span v-if="isProjectFilterActive" class="filter-count">{{ visibleProjectIds?.length || 0 }}/{{ allProjects.length }}</span>
+                </button>
+                <button
+                  v-if="isProjectFilterActive"
+                  type="button"
+                  class="project-picker-reset"
+                  @click.stop="$emit('show-all-projects'); projectPickerOpen = false"
+                >
+                  Show all
+                </button>
+              </div>
+
+              <div v-if="projectPickerOpen && allProjects" class="project-picker-list">
+                <label
+                  v-for="project in allProjects"
+                  :key="project.id"
+                  class="project-picker-item"
+                  @click.stop
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isProjectVisible(project.id)"
+                    @change.stop="$emit('toggle-project-visibility', project.id)"
+                  />
+                  <span
+                    class="project-picker-dot"
+                    :style="{ backgroundColor: project.color || '#64748b' }"
+                  />
+                  <span class="project-picker-name">{{ project.name }}</span>
+                </label>
+              </div>
+
               <div class="tree-content">
                 <div v-if="displayedTree.length === 0" class="tree-empty">
                   {{ searchQuery ? 'No matching sessions' : 'No worktrees' }}
@@ -370,6 +411,9 @@ const props = defineProps<{
   activeDirectory: string;
   selectedSessionId: string;
   homePath?: string;
+  allProjects?: { id: string; name: string; directory: string; color?: string }[];
+  visibleProjectIds?: string[];
+  isProjectFilterActive?: boolean;
 }>();
 
 const notifications = computed(() => props.notificationSessions ?? []);
@@ -393,10 +437,18 @@ const emit = defineEmits<{
   (event: 'logout'): void;
   (event: 'dropdown-closed'): void;
   (event: 'open-quota'): void;
+  (event: 'toggle-project-visibility', projectId: string): void;
+  (event: 'show-all-projects'): void;
 }>();
 
 const menuOpen = ref(false);
 const treeDropdownOpen = ref(false);
+const projectPickerOpen = ref(false);
+
+function isProjectVisible(projectId: string): boolean {
+  if (!props.isProjectFilterActive) return true;
+  return props.visibleProjectIds?.includes(projectId) ?? true;
+}
 
 watch(treeDropdownOpen, (open) => {
   if (open) {
@@ -754,6 +806,98 @@ function handleOpenDirectory(close: () => void) {
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+}
+
+.project-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.project-picker-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  background: #0b1320;
+  color: #94a3b8;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.project-picker-toggle:hover {
+  background: #1d2a45;
+}
+
+.project-picker-toggle.active {
+  color: #60a5fa;
+  border-color: #3b82f680;
+}
+
+.filter-count {
+  font-size: 10px;
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.project-picker-reset {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.project-picker-reset:hover {
+  color: #94a3b8;
+}
+
+.project-picker-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  border-bottom: 1px solid #1e293b;
+}
+
+.project-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+}
+
+.project-picker-item:hover {
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.project-picker-item input[type='checkbox'] {
+  margin: 0;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.project-picker-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.project-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-content {

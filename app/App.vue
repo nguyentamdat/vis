@@ -10,6 +10,9 @@
           :active-directory="activeDirectory"
           :selected-session-id="selectedSessionId"
           :home-path="homePath"
+          :all-projects="allProjectsList"
+          :visible-project-ids="projectVisibility.visibleIds.value"
+          :is-project-filter-active="projectVisibility.isFilterActive.value"
           @select-notification="handleNotificationSessionSelect"
           @create-worktree-from="createWorktreeFromWorktree"
           @new-session="createNewSession"
@@ -25,6 +28,8 @@
           @logout="handleLogout"
           @dropdown-closed="focusInput"
           @open-quota="openQuotaPanel"
+          @toggle-project-visibility="projectVisibility.toggle"
+          @show-all-projects="projectVisibility.showAll"
         />
       </header>
       <div
@@ -339,6 +344,7 @@ import { useQuestions, type QuestionRequest, type QuestionInfo } from './composa
 import { useTodos, type TodoItem } from './composables/useTodos';
 import { useDeltaAccumulator } from './composables/useDeltaAccumulator';
 import { useGlobalEvents } from './composables/useGlobalEvents';
+import { useVisibleProjects } from './composables/useVisibleProjects';
 import { useMessages } from './composables/useMessages';
 import { useOpenCodeApi } from './composables/useOpenCodeApi';
 import { useReasoningWindows } from './composables/useReasoningWindows';
@@ -819,6 +825,7 @@ const agentsLoading = ref(false);
 const commandsLoading = ref(false);
 const serverState = useServerState();
 const openCodeApi = useOpenCodeApi(serverState.projects);
+const projectVisibility = useVisibleProjects();
 const bootstrapReady = serverState.bootstrapped;
 const sessionSelection = useSessionSelection(
   computed(() => serverState.projects),
@@ -1039,6 +1046,7 @@ const filteredSessions = computed(() =>
 
 const topPanelTreeData = computed<TopPanelWorktree[]>(() => {
   const entries = Object.values(serverState.projects)
+    .filter((project) => projectVisibility.isVisible(project.id))
     .map((project) => {
       const worktreeDirectory = project.worktree;
       const sandboxEntries = Object.values(project.sandboxes)
@@ -1097,6 +1105,17 @@ const topPanelTreeData = computed<TopPanelWorktree[]>(() => {
     });
   return entries;
 });
+
+const allProjectsList = computed(() =>
+  Object.values(serverState.projects)
+    .map((p) => ({
+      id: p.id,
+      name: p.name?.trim() || p.worktree.replace(/\/+$/, '').split('/').pop() || p.id,
+      directory: p.worktree,
+      color: resolveProjectColorHex(p.icon?.color),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+);
 
 // Navigable session tree: mirrors TopPanel's displayedTree (no-search mode).
 // Filters archived sessions, truncates per-sandbox, and drops empty worktrees.
