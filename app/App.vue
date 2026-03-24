@@ -24,6 +24,7 @@
           @open-settings="isSettingsOpen = true"
           @logout="handleLogout"
           @dropdown-closed="focusInput"
+          @open-quota="openQuotaPanel"
         />
       </header>
       <div
@@ -314,6 +315,7 @@ import TopPanel, {
   type TopPanelWorktree,
 } from './components/TopPanel.vue';
 import SettingsModal from './components/SettingsModal.vue';
+import QuotaPanel from './components/QuotaPanel.vue';
 import ProjectSettingsDialog from './components/ProjectSettingsDialog.vue';
 import ContentViewer from './components/viewers/ContentViewer.vue';
 import DiffViewer from './components/viewers/DiffViewer.vue';
@@ -2202,6 +2204,26 @@ async function fetchHomePath() {
 
 function handleEditProject(payload: { projectId: string; worktree: string }) {
   editingProject.value = payload;
+}
+
+function openQuotaPanel() {
+  const key = 'quota';
+  if (fw.has(key)) {
+    fw.bringToFront(key);
+    return;
+  }
+  fw.open(key, {
+    component: QuotaPanel,
+    closable: true,
+    resizable: true,
+    scroll: 'none',
+    title: 'Provider Quota',
+    width: 600,
+    height: 420,
+    expiry: Infinity,
+    focusOnOpen: true,
+    color: '#6366f1',
+  });
 }
 
 async function handleSaveProject(payload: {

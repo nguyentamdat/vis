@@ -265,6 +265,14 @@
         </button>
       </div>
       <div class="top-right">
+        <button
+          type="button"
+          class="control-button quota-button"
+          title="Provider quota"
+          @click="$emit('open-quota')"
+        >
+          <Icon icon="lucide:gauge" :width="16" :height="16" />
+        </button>
         <a
           href="https://github.com/xenodrive/vis/"
           target="_blank"
@@ -384,6 +392,7 @@ const emit = defineEmits<{
   (event: 'open-settings'): void;
   (event: 'logout'): void;
   (event: 'dropdown-closed'): void;
+  (event: 'open-quota'): void;
 }>();
 
 const menuOpen = ref(false);
@@ -1184,6 +1193,23 @@ function handleOpenDirectory(close: () => void) {
 .control-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.quota-button {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #94a3b8;
+}
+
+.quota-button:hover {
+  background: transparent;
+  color: #e2e8f0;
 }
 
 .github-button {
