@@ -1,9 +1,41 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readFile } from 'node:fs/promises';
+import { watch } from 'node:fs';
 
 const providerCache = new Map();
 const CACHE_TTL_MS = 60_000;
+const AUTH_PATH = join(homedir(), '.local/share/opencode/auth.json');
+let lastAuthFingerprint = '';
+
+function authFingerprint(auth) {
+  const parts = [
+    auth?.anthropic?.access?.slice(-8) ?? '',
+    auth?.openai?.access?.slice(-8) ?? '',
+    auth?.['kimi-for-coding']?.key?.slice(-8) ?? auth?.kimi?.key?.slice(-8) ?? '',
+  ];
+  return parts.join('|');
+}
+
+async function checkAuthChanged() {
+  const auth = await readAuthConfig();
+  const fp = authFingerprint(auth);
+  if (fp !== lastAuthFingerprint) {
+    lastAuthFingerprint = fp;
+    providerCache.clear();
+  }
+  return auth;
+}
+
+let watchDebounce = null;
+try {
+  watch(AUTH_PATH, () => {
+    clearTimeout(watchDebounce);
+    watchDebounce = setTimeout(() => checkAuthChanged(), 2000);
+  });
+} catch {
+  // auth.json doesn't exist yet
+}
 const KNOWN_PROVIDERS = [
   { id: 'claude', name: 'Claude' },
   { id: 'openai', name: 'OpenAI' },
@@ -91,7 +123,7 @@ function resultBase(providerId, providerName, configured) {
 
 async function readAuthConfig() {
   try {
-    const raw = await readFile(join(homedir(), '.local/share/opencode/auth.json'), 'utf8');
+    const raw = await readFile(AUTH_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
@@ -285,9 +317,15 @@ export async function getProviderQuota(providerId) {
   const cached = providerCache.get(providerId);
   if (cached && cached.expiresAt > Date.now()) return cached.data;
 
-  const auth = await readAuthConfig();
+  const auth = await checkAuthChanged();
   const result = await fetchers[providerId](auth);
-  providerCache.set(providerId, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+
+  if (result.ok || !cached) {
+    providerCache.set(providerId, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  } else {
+    // On error (e.g. 429), return stale cache if available
+    return cached.data;
+  }
   return result;
 }
 
