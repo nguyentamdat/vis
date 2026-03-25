@@ -47,6 +47,8 @@ function toolEmoji(tool: string): string {
     case 'webfetch':
     case 'codesearch':
       return '🌐';
+    case 'skill':
+      return '📖';
     default:
       return '🔧';
   }
@@ -526,6 +528,42 @@ export function extractFileRead(
           toolName: tool,
           toolStatus: status,
           title: toolPrefix(tool, 'BATCH'),
+        };
+      }
+      case 'skill': {
+        const skillName = typeof input?.name === 'string' ? input.name.trim() : '';
+        if (status === 'running') {
+          return {
+            content: () =>
+              helpers.renderWorkerHtml({
+                id: `skill-${callId ?? Date.now().toString(36)}`,
+                code: `Loading skill: ${skillName || '...'}`,
+                lang: 'text',
+                theme: 'github-dark',
+                gutterMode: 'none',
+              }),
+            variant: 'term' as const,
+            callId,
+            toolName: tool,
+            toolStatus: status,
+            title: toolPrefix(tool, 'SKILL', skillName),
+          };
+        }
+        const skillCode = outputText ?? errorText ?? '';
+        return {
+          content: () =>
+            helpers.renderWorkerHtml({
+              id: `skill-${callId ?? Date.now().toString(36)}`,
+              code: skillCode,
+              lang: 'markdown',
+              theme: 'github-dark',
+              gutterMode: 'none',
+            }),
+          variant: 'plain' as const,
+          callId,
+          toolName: tool,
+          toolStatus: status,
+          title: toolPrefix(tool, 'SKILL', skillName),
         };
       }
       case 'write': {

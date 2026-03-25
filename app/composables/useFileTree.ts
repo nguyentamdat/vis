@@ -675,11 +675,12 @@ async function refreshGitFileSnapshot() {
   const generation = ++gitFileListGeneration;
   const { runOneShotPtyCommand } = usePtyOneshot();
   try {
+    const escaped = directory.replace(/'/g, "'\\''");
     const output = await runOneShotPtyCommand('bash', [
       '--noprofile',
       '--norc',
       '-c',
-      GIT_FILE_LIST_SCRIPT,
+      `cd '${escaped}' && ${GIT_FILE_LIST_SCRIPT}`,
     ]);
     if (generation !== gitFileListGeneration) return;
     if (activeDirectory.value.trim() !== directory) return;
@@ -738,11 +739,12 @@ async function refreshGitStatusOnly() {
   const generation = ++gitStatusGeneration;
   const { runOneShotPtyCommand } = usePtyOneshot();
   try {
+    const escaped = directory.replace(/'/g, "'\\''");
     const output = await runOneShotPtyCommand('bash', [
       '--noprofile',
       '--norc',
       '-c',
-      GIT_STATUS_SCRIPT,
+      `cd '${escaped}' && ${GIT_STATUS_SCRIPT}`,
     ]);
     if (generation !== gitStatusGeneration) return;
     if (!output.includes('##HEAD')) {
@@ -849,6 +851,8 @@ async function refreshBranchEntries() {
   const { runOneShotPtyCommand } = usePtyOneshot();
   try {
     const output = await runOneShotPtyCommand('git', [
+      '-C',
+      directory,
       '--no-pager',
       '-c',
       'color.ui=false',

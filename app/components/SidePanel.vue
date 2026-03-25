@@ -32,9 +32,10 @@
           <Icon icon="lucide:chevron-left" width="14" height="14" />
         </button>
       </div>
-      <TodoList v-if="activeTab === 'todo'" :sessions="todoSessions" />
+      <TodoList v-show="activeTab === 'todo'" :sessions="todoSessions" />
       <TreeView
-        v-else
+        :key="treeDirectoryName"
+        v-show="activeTab === 'tree'"
         :root-nodes="treeNodes"
         :expanded-paths="expandedTreePaths"
         :selected-path="selectedTreePath"
@@ -54,6 +55,27 @@
         @open-file="(path) => emit('open-file', path)"
         @reload="emit('reload')"
       />
+      <div v-show="activeTab === 'agents'" class="agents-body">
+        <div class="agents-header">
+          <div class="agents-title">AGENTS</div>
+          <div class="agents-count">{{ subagentEntries.length }}</div>
+        </div>
+        <div v-if="subagentEntries.length === 0" class="agents-empty">No subagents.</div>
+        <div v-else class="agents-list">
+          <div
+            v-for="entry in subagentEntries"
+            :key="entry.sessionId"
+            class="agent-card"
+            :class="`is-${entry.status}`"
+          >
+            <div class="agent-card-header">
+              <span class="agent-status-dot" :class="`is-${entry.status}`" />
+              <span class="agent-card-label">{{ entry.label }}</span>
+            </div>
+            <div v-if="entry.model" class="agent-card-meta">{{ entry.model }}</div>
+          </div>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
@@ -85,10 +107,20 @@ type TodoPanelSession = {
   error: string | undefined;
 };
 
+type SubagentEntry = {
+  sessionId: string;
+  label: string;
+  status: 'busy' | 'idle' | 'retry' | 'unknown';
+  agent: string;
+  description: string;
+  model: string;
+};
+
 const props = defineProps<{
   collapsed: boolean;
-  activeTab: 'todo' | 'tree';
+  activeTab: 'todo' | 'tree' | 'agents';
   todoSessions: TodoPanelSession[];
+  subagentEntries: SubagentEntry[];
   treeNodes: TreeNode[];
   expandedTreePaths: string[];
   selectedTreePath?: string;
@@ -105,7 +137,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'toggle-collapse'): void;
-  (event: 'change-tab', value: 'todo' | 'tree'): void;
+  (event: 'change-tab', value: 'todo' | 'tree' | 'agents'): void;
   (event: 'toggle-dir', path: string): void;
   (event: 'select-file', path: string): void;
   (event: 'open-diff', payload: { path: string; staged: boolean }): void;
@@ -117,12 +149,14 @@ const emit = defineEmits<{
 const tabs = [
   { id: 'todo' as const, label: 'TODO' },
   { id: 'tree' as const, label: 'TREE' },
+  { id: 'agents' as const, label: 'AGENTS' },
 ];
 
 const {
   collapsed,
   activeTab,
   todoSessions,
+  subagentEntries,
   treeNodes,
   expandedTreePaths,
   selectedTreePath,
@@ -221,5 +255,107 @@ const {
   height: 100%;
   border: 0;
   border-radius: 0;
+}
+
+.agents-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.agents-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(100, 116, 139, 0.28);
+}
+
+.agents-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+}
+
+.agents-count {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.agents-empty {
+  margin: auto;
+  color: rgba(148, 163, 184, 0.9);
+  font-size: 12px;
+}
+
+.agents-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-card {
+  border: 1px solid rgba(71, 85, 105, 0.55);
+  border-radius: 8px;
+  padding: 7px 8px;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.agent-card.is-busy {
+  border-color: rgba(250, 204, 21, 0.5);
+}
+
+.agent-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #64748b;
+}
+
+.agent-status-dot.is-busy {
+  background: #facc15;
+  box-shadow: 0 0 4px rgba(250, 204, 21, 0.6);
+}
+
+.agent-status-dot.is-idle {
+  background: #4ade80;
+}
+
+.agent-status-dot.is-retry {
+  background: #f87171;
+}
+
+.agent-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-meta {
+  margin-top: 3px;
+  padding-left: 13px;
+  font-size: 10px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

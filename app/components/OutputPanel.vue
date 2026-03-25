@@ -95,7 +95,7 @@ const props = defineProps<{
   isStatusError: boolean;
   isThinking: boolean;
   isRetryStatus?: boolean;
-  busyDescendantCount?: number;
+  busyDescendantLabels?: string[];
   theme: string;
   resolveAgentColor?: (agent?: string) => string;
   resolveModelMeta?: (modelPath?: string) => ModelMeta | undefined;
@@ -214,7 +214,7 @@ const { getAssistantHtml, getDeferredTransitionKey } = useAssistantPreRenderer({
 
 const { thinkingDisplayText } = useThinkingAnimation(
   computed(() => props.isThinking),
-  computed(() => props.busyDescendantCount ?? 0),
+  computed(() => props.busyDescendantLabels ?? []),
 );
 
 function isRevertedRoot(root: MessageInfo): boolean {

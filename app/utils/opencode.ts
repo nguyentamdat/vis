@@ -110,6 +110,14 @@ export function getPathInfo(options?: RequestOptions) {
   return getJson('/path', undefined, options) as Promise<Record<string, string>>;
 }
 
+export function getHealth() {
+  return getJson('/global/health') as Promise<{ healthy: boolean; version: string }>;
+}
+
+export function getGlobalConfig() {
+  return getJson('/global/config') as Promise<Record<string, unknown>>;
+}
+
 export function listFiles(payload: { directory: string; path?: string }, options?: RequestOptions) {
   return getJson(
     '/file',

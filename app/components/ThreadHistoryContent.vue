@@ -70,9 +70,9 @@
           @click="handleToolClick(entry.part)"
         >
           <div class="history-meta">
-            <span class="history-index">🔧</span>
+            <span class="history-index">{{ toolIcon(entry.part.tool) }}</span>
             <span class="history-tool-badge" :class="`history-tool-${entry.part.tool}`">{{
-              toolBadgeLabel(entry.part.tool)
+              toolBadgeLabel(entry.part)
             }}</span>
             <span class="history-tool-status" :class="`is-${toolStatusLabel(entry.part)}`">{{
               toolStatusLabel(entry.part)
@@ -152,8 +152,32 @@ function getCustomAnswer(entry: QuestionHistoryEntry, questionIndex: number): st
   return answer.filter((v) => !optionLabels.has(v)).join(', ');
 }
 
-function toolBadgeLabel(tool: string): string {
+function toolIcon(tool: string): string {
   switch (tool) {
+    case 'task':
+      return '\u{1F916}';
+    case 'skill':
+      return '\u{1F4D6}';
+    default:
+      return '\u{1F527}';
+  }
+}
+
+function toolBadgeLabel(part: ToolPart): string {
+  if (part.tool === 'task') {
+    const input = part.state.input;
+    const meta =
+      part.state.status === 'completed' || part.state.status === 'error' || part.state.status === 'running'
+        ? (part.state as Record<string, unknown>).metadata as Record<string, unknown> | undefined
+        : undefined;
+    const modelObj = meta?.model && typeof meta.model === 'object'
+      ? meta.model as Record<string, unknown> : undefined;
+    const agentType = typeof input?.subagent_type === 'string' ? input.subagent_type : '';
+    const modelId = typeof modelObj?.modelID === 'string' ? modelObj.modelID.split('/').pop()! : '';
+    const parts = [agentType, modelId].filter(Boolean);
+    return parts.length > 0 ? parts.join(' · ').toUpperCase() : 'AGENT';
+  }
+  switch (part.tool) {
     case 'bash':
       return 'SHELL';
     case 'write':
@@ -164,8 +188,10 @@ function toolBadgeLabel(tool: string): string {
       return 'EDIT';
     case 'apply_patch':
       return 'PATCH';
+    case 'skill':
+      return 'SKILL';
     default:
-      return tool.toUpperCase();
+      return part.tool.toUpperCase();
   }
 }
 
@@ -210,6 +236,30 @@ function toolSummary(part: ToolPart): string {
         .filter(Boolean) as string[];
       return paths.length > 0 ? paths.join(', ') : 'patch';
     }
+    case 'task': {
+      const meta =
+        part.state.status === 'completed' || part.state.status === 'error' || part.state.status === 'running'
+          ? (part.state as Record<string, unknown>).metadata as Record<string, unknown> | undefined
+          : undefined;
+      const modelObj = meta?.model && typeof meta.model === 'object'
+        ? meta.model as Record<string, unknown> : undefined;
+      const desc = typeof input?.description === 'string' ? input.description.trim() : '';
+      const prompt = typeof input?.prompt === 'string' ? input.prompt.trim() : '';
+      const label = desc || (prompt ? prompt.split('\n')[0].slice(0, 120) : '');
+      const skills = Array.isArray(input?.load_skills)
+        ? (input.load_skills as string[]).filter(Boolean)
+        : [];
+      const modelId = typeof modelObj?.modelID === 'string' ? modelObj.modelID : '';
+      const segments: string[] = [];
+      if (label) segments.push(label);
+      if (modelId) segments.push(modelId);
+      if (skills.length > 0) segments.push(`[${skills.join(', ')}]`);
+      return segments.join(' \u00b7 ') || 'task';
+    }
+    case 'skill': {
+      const name = typeof input?.name === 'string' ? input.name.trim() : '';
+      return name || 'skill';
+    }
     default:
       return part.tool;
   }
@@ -229,6 +279,10 @@ function toolHeaderColor(tool: string): string {
       return '#f97316';
     case 'write':
       return '#f97316';
+    case 'task':
+      return '#818cf8';
+    case 'skill':
+      return '#10b981';
     default:
       return '#64748b';
   }

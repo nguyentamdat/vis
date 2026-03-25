@@ -103,6 +103,8 @@ export function toolColor(tool: string): string {
     case 'plan_enter':
     case 'plan_exit':
       return '#94a3b8';
+    case 'skill':
+      return '#10b981';
     default:
       return '#64748b';
   }

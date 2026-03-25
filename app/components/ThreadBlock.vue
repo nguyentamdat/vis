@@ -130,7 +130,7 @@ import type {
 import type { MessageInfo, QuestionInfo, ToolPart } from '../types/sse';
 import { formatElapsedTime, formatMessageError, formatMessageTime } from '../utils/formatters';
 
-const HISTORY_TOOL_NAMES = new Set(['bash', 'write', 'edit', 'multiedit', 'apply_patch']);
+const HISTORY_TOOL_NAMES = new Set(['bash', 'write', 'edit', 'multiedit', 'apply_patch', 'task', 'skill']);
 
 const props = defineProps<{
   root: MessageInfo;

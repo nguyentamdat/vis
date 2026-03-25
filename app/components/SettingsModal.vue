@@ -26,15 +26,36 @@
             <span class="toggle-track" />
           </label>
         </div>
+
+        <div class="setting-section-title">Versions</div>
+        <div class="setting-row setting-row-info">
+          <div class="setting-info">
+            <div class="setting-label">OpenCode</div>
+            <div class="setting-description">Server version</div>
+          </div>
+          <span class="setting-value">{{ opencodeVersion || '—' }}</span>
+        </div>
+        <div
+          v-for="plugin in plugins"
+          :key="plugin.name"
+          class="setting-row setting-row-info"
+        >
+          <div class="setting-info">
+            <div class="setting-label">{{ plugin.name }}</div>
+            <div class="setting-description">{{ plugin.path }}</div>
+          </div>
+          <span class="setting-value">plugin</span>
+        </div>
       </div>
     </div>
   </dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useSettings } from '../composables/useSettings';
+import { getHealth, getGlobalConfig } from '../utils/opencode';
 
 const props = defineProps<{
   open: boolean;
@@ -46,6 +67,29 @@ defineEmits<{
 
 const dialogRef = ref<HTMLDialogElement | null>(null);
 const { enterToSend } = useSettings();
+const opencodeVersion = ref('');
+const plugins = ref<{ name: string; path: string }[]>([]);
+
+async function loadVersionInfo() {
+  try {
+    const raw = await getHealth() as Record<string, unknown>;
+    const version = typeof raw?.version === 'string' ? raw.version : '';
+    opencodeVersion.value = version;
+  } catch (e) {
+    console.warn('[settings] health fetch failed', e);
+  }
+  try {
+    const raw = await getGlobalConfig() as Record<string, unknown>;
+    const pluginPaths = Array.isArray(raw?.plugin) ? raw.plugin as string[] : [];
+    plugins.value = pluginPaths.map((p) => {
+      const segments = String(p).replace(/[\\/]+$/, '').split(/[\\/]/);
+      const name = segments.at(-1) || String(p);
+      return { name, path: String(p) };
+    });
+  } catch (e) {
+    console.warn('[settings] config fetch failed', e);
+  }
+}
 
 watch(
   () => props.open,
@@ -54,6 +98,7 @@ watch(
     if (!el) return;
     if (open) {
       if (!el.open) el.showModal();
+      void loadVersionInfo();
     } else if (el.open) {
       el.close();
     }
@@ -146,6 +191,26 @@ watch(
   border: 1px solid #1e293b;
   border-radius: 8px;
   background: rgba(2, 6, 23, 0.45);
+}
+
+.setting-row-info {
+  padding: 8px 12px;
+}
+
+.setting-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.setting-value {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .setting-info {

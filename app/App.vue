@@ -49,6 +49,7 @@
             :collapsed="sidePanelCollapsed"
             :active-tab="sidePanelActiveTab"
             :todo-sessions="todoPanelSessions"
+            :subagent-entries="subagentEntries"
             :tree-nodes="treeNodes"
             :expanded-tree-paths="expandedTreePaths"
             :selected-tree-path="selectedTreePath"
@@ -94,7 +95,7 @@
                     :is-status-error="isStatusError"
                     :is-thinking="isThinking"
                     :is-retry-status="!!retryStatus"
-                    :busy-descendant-count="busyDescendantSessionIds.length"
+                    :busy-descendant-labels="busyDescendantLabels"
                     :theme="shikiTheme"
                     :resolve-agent-color="resolveAgentColorForName"
                     :resolve-model-meta="resolveModelMetaForPath"
@@ -549,6 +550,15 @@ type TodoPanelSession = {
   error: string | undefined;
 };
 
+type SubagentEntry = {
+  sessionId: string;
+  label: string;
+  status: 'busy' | 'idle' | 'retry' | 'unknown';
+  agent: string;
+  description: string;
+  model: string;
+};
+
 type FileContentResponse = {
   content?: string;
   encoding?: string;
@@ -720,7 +730,7 @@ const notificationSessionOrder = ref<string[]>([]);
 const notificationPermissionRequested = ref(false);
 
 const sidePanelCollapsed = ref(readSidePanelCollapsed());
-const sidePanelActiveTab = ref(readSidePanelTab());
+const sidePanelActiveTab = ref<'todo' | 'tree' | 'agents'>(readSidePanelTab());
 
 type SessionInfo = {
   id: string;
@@ -1254,8 +1264,10 @@ const todoPanelSessions = computed(() => {
   if (allowed.size === 0) return [] as TodoPanelSession[];
   const list = Array.from(allowed).map((sessionId) => {
     const session = sessions.value.find((item) => item.id === sessionId);
-    const title = sessionLabel(session ?? { id: sessionId });
     const isSubagent = Boolean(sessionParentById.value.get(sessionId));
+    const title = isSubagent
+      ? (subagentInfoBySessionId.value.get(sessionId)?.label ?? sessionLabel(session ?? { id: sessionId }))
+      : sessionLabel(session ?? { id: sessionId });
     return {
       sessionId,
       title,
@@ -1298,6 +1310,66 @@ const busyDescendantSessionIds = computed(() => {
     if (status === 'busy' || status === 'retry') ids.push(sid);
   }
   return ids;
+});
+
+// Map subagent sessionId → info extracted from parent task tool parts
+const subagentInfoBySessionId = computed(() => {
+  const infoMap = new Map<string, { label: string; agent: string; description: string; model: string }>();
+  for (const root of msg.roots.value) {
+    const thread = msg.getThread(root.id);
+    for (const mi of thread) {
+      if (mi.role !== 'assistant') continue;
+      for (const part of msg.getParts(mi.id)) {
+        if (part.type !== 'tool' || part.tool !== 'task') continue;
+        const state = part.state as Record<string, unknown>;
+        const meta = state.metadata as Record<string, unknown> | undefined;
+        const childSessionId = typeof meta?.sessionId === 'string' ? meta.sessionId : '';
+        if (!childSessionId) continue;
+        const input = state.input as Record<string, unknown> | undefined;
+        const desc = typeof input?.description === 'string' ? input.description.trim() : '';
+        const agent = typeof input?.subagent_type === 'string' ? input.subagent_type : '';
+        const modelObj = meta?.model && typeof meta.model === 'object'
+          ? meta.model as Record<string, unknown> : undefined;
+        const model = typeof modelObj?.modelID === 'string'
+          ? modelObj.modelID.split('/').pop()! : '';
+        const segments: string[] = [];
+        if (agent) segments.push(agent);
+        if (desc) segments.push(desc);
+        else if (model) segments.push(model);
+        infoMap.set(childSessionId, {
+          label: segments.join(': ') || childSessionId,
+          agent,
+          description: desc,
+          model,
+        });
+      }
+    }
+  }
+  return infoMap;
+});
+
+const busyDescendantLabels = computed(() =>
+  busyDescendantSessionIds.value.map((sid) => subagentInfoBySessionId.value.get(sid)?.label ?? sid),
+);
+
+const subagentEntries = computed<SubagentEntry[]>(() => {
+  const allowed = allowedSessionIds.value;
+  const selected = selectedSessionId.value;
+  const entries: SubagentEntry[] = [];
+  for (const sid of allowed) {
+    if (sid === selected) continue;
+    const status = (getSessionStatus(sid) ?? 'unknown') as SubagentEntry['status'];
+    const info = subagentInfoBySessionId.value.get(sid);
+    entries.push({
+      sessionId: sid,
+      label: info?.label ?? sid,
+      status,
+      agent: info?.agent ?? '',
+      description: info?.description ?? '',
+      model: info?.model ?? '',
+    });
+  }
+  return entries;
 });
 
 const isThinking = computed(() => {
@@ -1644,12 +1716,13 @@ function persistSidePanelCollapsed(value: boolean) {
   storageSet(StorageKeys.state.sidePanelCollapsed, value ? '1' : '0');
 }
 
-function readSidePanelTab(): 'todo' | 'tree' {
+function readSidePanelTab(): 'todo' | 'tree' | 'agents' {
   const raw = storageGet(StorageKeys.state.sidePanelTab);
-  return raw === 'todo' ? 'todo' : 'tree';
+  if (raw === 'todo' || raw === 'tree' || raw === 'agents') return raw;
+  return 'tree';
 }
 
-function persistSidePanelTab(value: 'todo' | 'tree') {
+function persistSidePanelTab(value: 'todo' | 'tree' | 'agents') {
   storageSet(StorageKeys.state.sidePanelTab, value);
 }
 
@@ -1663,7 +1736,7 @@ function toggleSidePanelCollapsed() {
   });
 }
 
-function setSidePanelTab(value: 'todo' | 'tree') {
+function setSidePanelTab(value: 'todo' | 'tree' | 'agents') {
   if (sidePanelActiveTab.value === value) return;
   sidePanelActiveTab.value = value;
   persistSidePanelTab(value);
@@ -4367,6 +4440,7 @@ const TOOL_WINDOW_SUPPORTED = new Set([
   'multiedit',
   'read',
   'task',
+  'skill',
   'webfetch',
   'websearch',
   'write',
