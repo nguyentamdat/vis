@@ -44,7 +44,7 @@
             <div class="setting-label">{{ plugin.name }}</div>
             <div class="setting-description">{{ plugin.path }}</div>
           </div>
-          <span class="setting-value">plugin</span>
+          <span class="setting-value">{{ plugin.version || 'plugin' }}</span>
         </div>
       </div>
     </div>
@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useSettings } from '../composables/useSettings';
 import { getHealth, getGlobalConfig } from '../utils/opencode';
@@ -68,7 +68,7 @@ defineEmits<{
 const dialogRef = ref<HTMLDialogElement | null>(null);
 const { enterToSend } = useSettings();
 const opencodeVersion = ref('');
-const plugins = ref<{ name: string; path: string }[]>([]);
+const plugins = ref<{ name: string; path: string; version?: string }[]>([]);
 
 async function loadVersionInfo() {
   try {
@@ -82,9 +82,15 @@ async function loadVersionInfo() {
     const raw = await getGlobalConfig() as Record<string, unknown>;
     const pluginPaths = Array.isArray(raw?.plugin) ? raw.plugin as string[] : [];
     plugins.value = pluginPaths.map((p) => {
-      const segments = String(p).replace(/[\\/]+$/, '').split(/[\\/]/);
-      const name = segments.at(-1) || String(p);
-      return { name, path: String(p) };
+      const raw = String(p).replace(/[\\/]+$/, '');
+      const segments = raw.split(/[\\/]/);
+      let name = segments.at(-1) || raw;
+      let version: string | undefined;
+      for (const seg of segments) {
+        const m = seg.match(/^(.+)@(\d+\.\d+\.\d+(?:-[\w.]+)?)@@@\d+$/);
+        if (m) { name = m[1]; version = m[2]; break; }
+      }
+      return { name, path: raw, version };
     });
   } catch (e) {
     console.warn('[settings] config fetch failed', e);

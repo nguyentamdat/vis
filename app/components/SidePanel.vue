@@ -70,9 +70,10 @@
           >
             <div class="agent-card-header">
               <span class="agent-status-dot" :class="`is-${entry.status}`" />
-              <span class="agent-card-label">{{ entry.label }}</span>
+              <span class="agent-card-badge">{{ agentBadgeLabel(entry) }}</span>
+              <span class="agent-card-status" :class="`is-${entry.status}`">{{ entry.status }}</span>
             </div>
-            <div v-if="entry.model" class="agent-card-meta">{{ entry.model }}</div>
+            <div v-if="entry.description" class="agent-card-desc">{{ entry.description }}</div>
           </div>
         </div>
       </div>
@@ -170,6 +171,11 @@ const {
   treeBranchListLoading,
   runShellCommand,
 } = toRefs(props);
+
+function agentBadgeLabel(entry: SubagentEntry): string {
+  const parts = [entry.agent, entry.model].filter(Boolean);
+  return parts.length > 0 ? parts.join(' \u00b7 ').toUpperCase() : 'AGENT';
+}
 </script>
 
 <style scoped>
@@ -339,20 +345,43 @@ const {
   background: #f87171;
 }
 
-.agent-card-label {
-  font-size: 12px;
-  font-weight: 600;
+.agent-card-badge {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   color: #e2e8f0;
+  background: #334155;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agent-card-meta {
+.agent-card-status {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.agent-card-status.is-busy {
+  color: #fbbf24;
+}
+
+.agent-card-status.is-idle {
+  color: #4ade80;
+}
+
+.agent-card-status.is-retry {
+  color: #f87171;
+}
+
+.agent-card-desc {
   margin-top: 3px;
   padding-left: 13px;
-  font-size: 10px;
+  font-size: 11px;
   color: #94a3b8;
   overflow: hidden;
   text-overflow: ellipsis;
