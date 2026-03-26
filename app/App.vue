@@ -728,6 +728,8 @@ let floatingExtentResizeObserver: ResizeObserver | null = null;
 let floatingExtentObservedEl: HTMLDivElement | null = null;
 const notificationSessionOrder = ref<string[]>([]);
 const notificationPermissionRequested = ref(false);
+type ActiveBrowserNotification = { notification: Notification; projectId: string; sessionId: string };
+const activeBrowserNotifications: ActiveBrowserNotification[] = [];
 
 const sidePanelCollapsed = ref(readSidePanelCollapsed());
 const sidePanelActiveTab = ref<'todo' | 'tree' | 'agents'>(readSidePanelTab());
@@ -1259,6 +1261,37 @@ watch(
   { immediate: true, deep: true },
 );
 
+// Close stale browser notifications when their sessions are resolved
+let prevNotificationKeys = new Set<string>();
+watch(
+  () => serverState.notifications,
+  (notifications) => {
+    const currentKeys = new Set(Object.keys(notifications));
+    const hasRemovals = [...prevNotificationKeys].some((k) => !currentKeys.has(k));
+    prevNotificationKeys = currentKeys;
+    if (!hasRemovals) return;
+    const toClose: ActiveBrowserNotification[] = [];
+    for (const entry of activeBrowserNotifications) {
+      if (!isSessionCoveredByNotifications(entry.projectId, entry.sessionId)) {
+        toClose.push(entry);
+      }
+    }
+    for (const entry of toClose) entry.notification.close();
+  },
+  { deep: true },
+);
+
+const BASE_DOCUMENT_TITLE = 'Vis - OpenCode Visualizer';
+watch(
+  notificationSessions,
+  (sessions) => {
+    if (typeof document === 'undefined') return;
+    const count = sessions.reduce((sum, s) => sum + s.count, 0);
+    document.title = count > 0 ? `(${count}) ${BASE_DOCUMENT_TITLE}` : BASE_DOCUMENT_TITLE;
+  },
+  { immediate: true },
+);
+
 const todoPanelSessions = computed(() => {
   const allowed = allowedSessionIds.value;
   if (allowed.size === 0) return [] as TodoPanelSession[];
@@ -1354,12 +1387,16 @@ const busyDescendantLabels = computed(() =>
 
 const subagentEntries = computed<SubagentEntry[]>(() => {
   const allowed = allowedSessionIds.value;
+  const infoMap = subagentInfoBySessionId.value;
   const selected = selectedSessionId.value;
+  const seen = new Set<string>();
   const entries: SubagentEntry[] = [];
+  // Sessions from server state (tracks live status)
   for (const sid of allowed) {
     if (sid === selected) continue;
+    seen.add(sid);
     const status = (getSessionStatus(sid) ?? 'unknown') as SubagentEntry['status'];
-    const info = subagentInfoBySessionId.value.get(sid);
+    const info = infoMap.get(sid);
     entries.push({
       sessionId: sid,
       label: info?.label ?? sid,
@@ -1367,6 +1404,19 @@ const subagentEntries = computed<SubagentEntry[]>(() => {
       agent: info?.agent ?? '',
       description: info?.description ?? '',
       model: info?.model ?? '',
+    });
+  }
+  // Sessions found in message history but pruned from server state
+  for (const [sid, info] of infoMap) {
+    if (seen.has(sid) || sid === selected) continue;
+    const status = (getSessionStatus(sid) ?? 'unknown') as SubagentEntry['status'];
+    entries.push({
+      sessionId: sid,
+      label: info.label,
+      status,
+      agent: info.agent,
+      description: info.description,
+      model: info.model,
     });
   }
   return entries;
@@ -2774,6 +2824,33 @@ function isWindowAttentive(): boolean {
   return !document.hidden && document.hasFocus();
 }
 
+function isSessionCoveredByNotifications(projectId: string, sessionId: string): boolean {
+  for (const entry of Object.values(serverState.notifications)) {
+    if (entry.projectId !== projectId) continue;
+    if (entry.sessionId === sessionId) return true;
+    const project = serverState.projects[projectId];
+    if (!project) continue;
+    let current = sessionId;
+    const visited = new Set<string>();
+    while (current && !visited.has(current)) {
+      visited.add(current);
+      let parentId: string | undefined;
+      for (const sandbox of Object.values(project.sandboxes)) {
+        const session = sandbox.sessions[current];
+        if (session?.parentID) {
+          parentId = session.parentID;
+          break;
+        }
+      }
+      if (!parentId) break;
+      if (parentId === entry.sessionId) return true;
+      current = parentId;
+    }
+  }
+  return false;
+}
+
+
 function showBrowserNotification(
   projectId: string,
   sessionId: string,
@@ -2800,10 +2877,15 @@ function showBrowserNotification(
     body,
     tag: `vis-${type}-${projectId}-${sessionId}`,
   });
+  activeBrowserNotifications.push({ notification, projectId, sessionId });
   notification.onclick = () => {
     window.focus();
     void switchSessionSelection(projectId.trim(), sessionId.trim());
     notification.close();
+  };
+  notification.onclose = () => {
+    const idx = activeBrowserNotifications.findIndex((e) => e.notification === notification);
+    if (idx >= 0) activeBrowserNotifications.splice(idx, 1);
   };
 }
 

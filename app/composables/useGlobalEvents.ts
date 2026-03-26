@@ -4,6 +4,7 @@ import type { TabToWorkerMessage, WorkerToTabMessage } from '../types/sse-worker
 import { createSseConnection } from '../utils/sseConnection';
 import { TypedEmitter } from '../utils/eventEmitter';
 import SseSharedWorker from '../workers/sse-shared-worker?sharedworker';
+import { createDirectModeState } from '../utils/directModeState';
 
 type EventKey = keyof GlobalEventMap;
 type ConnectOptions = { failFast?: boolean; timeoutMs?: number };
@@ -138,10 +139,17 @@ function createDirectTransport(callbacks: TransportCallbacks): Transport {
   let connected = false;
   let openResolver: ((value: void) => void) | null = null;
   let openRejector: ((reason: Error) => void) | null = null;
+  let connectBaseUrl = '';
+  let connectAuthorization: string | undefined;
+
+  const directState = createDirectModeState((message) => {
+    callbacks.onWorkerMessage?.(message);
+  });
 
   const connection = createSseConnection({
     onPacket(packet) {
       callbacks.onPacket(packet);
+      directState.handlePacket(packet);
     },
     onOpen(isReconnect) {
       connected = true;
@@ -152,6 +160,11 @@ function createDirectTransport(callbacks: TransportCallbacks): Transport {
         openResolver = null;
         openRejector = null;
       }
+      void directState.bootstrap(connectBaseUrl, connectAuthorization).catch((error) => {
+        const message =
+          error instanceof Error ? error.message : 'Failed to bootstrap state.';
+        callbacks.onError(message);
+      });
     },
     onError(message, statusCode) {
       connected = false;
@@ -192,6 +205,8 @@ function createDirectTransport(callbacks: TransportCallbacks): Transport {
       if (!normalized) {
         throw new Error('SSE base URL is empty.');
       }
+      connectBaseUrl = normalized;
+      connectAuthorization = authorization;
       connection.connect({ baseUrl: normalized, authorization });
       if (options.failFast) {
         await waitForOpen(options.timeoutMs ?? 5000);
@@ -206,7 +221,15 @@ function createDirectTransport(callbacks: TransportCallbacks): Transport {
         openRejector = null;
       }
     },
-    sendToWorker() {
+    sendToWorker(message) {
+      if (message.type === 'selection.active') {
+        directState.setActiveSelection(message.projectId, message.sessionId);
+        return true;
+      }
+      if (message.type === 'load-sessions') {
+        directState.loadSessions(message.directory);
+        return true;
+      }
       return false;
     },
   };
