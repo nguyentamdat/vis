@@ -586,21 +586,6 @@ function emitNotificationsUpdated(state: ConnectionState) {
   });
 }
 
-function shouldSuppressIdleNotification(
-  state: ConnectionState,
-  projectId: string,
-  rootSessionId: string,
-) {
-  if (!projectId || !rootSessionId) return false;
-  const activeSelection = state.activeSelection;
-  if (!activeSelection) return false;
-  if (activeSelection.projectId !== projectId) return false;
-  const activeRootSessionId = state.stateBuilder.resolveRootSessionIdForProject(
-    projectId,
-    activeSelection.sessionId,
-  );
-  return activeRootSessionId === rootSessionId;
-}
 
 function emitNotificationShow(
   state: ConnectionState,
@@ -705,7 +690,7 @@ function handleStatePacket(state: ConnectionState, packet: SsePacket) {
           if (!treeIdle) {
             notificationsChanged =
               state.notificationManager.removeNotification(idleRequestId) || notificationsChanged;
-          } else if (!shouldSuppressIdleNotification(state, statusProjectId, rootSessionId)) {
+          } else {
             const added = state.notificationManager.addNotification(
               statusProjectId,
               rootSessionId,

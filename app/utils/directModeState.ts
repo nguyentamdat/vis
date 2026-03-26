@@ -79,16 +79,6 @@ export function createDirectModeState(emit: Emit) {
     emit({ type: 'notification.show', projectId, sessionId, kind });
   }
 
-  function shouldSuppressIdleNotification(projectId: string, rootSessionId: string) {
-    if (!projectId || !rootSessionId) return false;
-    if (!activeSelection) return false;
-    if (activeSelection.projectId !== projectId) return false;
-    const activeRootSessionId = stateBuilder.resolveRootSessionIdForProject(
-      projectId,
-      activeSelection.sessionId,
-    );
-    return activeRootSessionId === rootSessionId;
-  }
 
   async function bootstrap(baseUrl: string, authorization?: string): Promise<void> {
     setBaseUrl(baseUrl);
@@ -245,7 +235,7 @@ export function createDirectModeState(emit: Emit) {
             if (!treeIdle) {
               notificationsChanged =
                 notificationManager.removeNotification(idleRequestId) || notificationsChanged;
-            } else if (!shouldSuppressIdleNotification(statusProjectId, rootSessionId)) {
+            } else {
               const added = notificationManager.addNotification(
                 statusProjectId,
                 rootSessionId,

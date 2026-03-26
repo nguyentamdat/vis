@@ -2858,7 +2858,6 @@ function showBrowserNotification(
 ) {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   if (typeof Notification === 'undefined') return;
-  if (isWindowAttentive()) return;
   if (Notification.permission !== 'granted') return;
   const session = sessions.value.find(
     (entry) => entry.id === sessionId && resolveProjectIdForSession(entry.id) === projectId,
