@@ -82,16 +82,22 @@ async function loadVersionInfo() {
     const raw = await getGlobalConfig() as Record<string, unknown>;
     const pluginPaths = Array.isArray(raw?.plugin) ? raw.plugin as string[] : [];
     plugins.value = pluginPaths.map((p) => {
-      const raw = String(p).replace(/[\\/]+$/, '');
-      const segments = raw.split(/[\\/]/);
-      let name = segments.at(-1) || raw;
-      let version: string | undefined;
-      for (const seg of segments) {
-        const m = seg.match(/^(.+)@(\d+\.\d+\.\d+(?:-[\w.]+)?)@@@\d+$/);
-        if (m) { name = m[1]; version = m[2]; break; }
-      }
-      return { name, path: raw, version };
+      const raw = String(p);
+      const segments = raw.replace(/[\\/]+$/, '').split(/[\\/]/);
+      const name = segments.at(-1) || raw;
+      return { name, path: raw };
     });
+    try {
+      const params = new URLSearchParams();
+      for (const p of pluginPaths) params.append('plugin', String(p));
+      const res = await fetch(`/api/plugin-versions?${params}`);
+      if (res.ok) {
+        const versions = await res.json() as Record<string, string>;
+        for (const plugin of plugins.value) {
+          plugin.version = versions[plugin.path] ?? versions[plugin.name];
+        }
+      }
+    } catch {}
   } catch (e) {
     console.warn('[settings] config fetch failed', e);
   }
